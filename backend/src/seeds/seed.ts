@@ -3,9 +3,11 @@ import bcrypt from 'bcryptjs';
 import { connectDatabase, disconnectDatabase } from '../config/database.js';
 import { BackhaulRequest } from '../models/BackhaulRequest.js';
 import { BusinessProfile } from '../models/BusinessProfile.js';
-import { Corridor } from '../models/Corridor.js';
+import { Corridor, DEFAULT_CORRIDOR_SLOT_SCHEDULES } from '../models/Corridor.js';
 import { DeliveryProof } from '../models/DeliveryProof.js';
+import { DriverContract } from '../models/DriverContract.js';
 import { DriverProfile } from '../models/DriverProfile.js';
+import { DriverSlotCommitment } from '../models/DriverSlotCommitment.js';
 import { ExceptionEvent } from '../models/ExceptionEvent.js';
 import { NotificationLog } from '../models/NotificationLog.js';
 import { Payment } from '../models/Payment.js';
@@ -21,6 +23,10 @@ import { TripLedger } from '../models/TripLedger.js';
 import { User, type IUser } from '../models/User.js';
 import { Vehicle } from '../models/Vehicle.js';
 import { calculateCargoMetrics } from '../services/cargoCalculator.js';
+import {
+  migrateToSinglePlatformOwner,
+  provisionSinglePlatformOwner,
+} from '../services/platformOwnerService.js';
 import {
   calculateDeterministicPrice,
   DEFAULT_PRICING_RULES,
@@ -45,6 +51,8 @@ export async function resetDemoState(): Promise<void> {
     RouteMatrixCache.deleteMany({}),
     Slot.deleteMany({}),
     BackhaulRequest.deleteMany({}),
+    DriverContract.deleteMany({}),
+    DriverSlotCommitment.deleteMany({}),
   ]);
   await Promise.all([
     Shipment.syncIndexes(),
@@ -115,6 +123,11 @@ export async function seedDatabase(options: SeedOptions = {}) {
     },
   ];
 
+  // Clean up any legacy multi-owner demo accounts if present
+  await User.deleteMany({
+    email: { $in: ['owner1@meecargo.demo', 'owner2@meecargo.demo'] },
+  });
+
   const userMap = new Map<string, IUser>();
   for (const user of demoUsers) {
     const doc = await User.findOneAndUpdate(
@@ -132,6 +145,7 @@ export async function seedDatabase(options: SeedOptions = {}) {
   const shipper3 = userMap.get('shipper3@meecargo.demo')!;
   const driver1 = userMap.get('driver1@meecargo.demo')!;
   const driver2 = userMap.get('driver2@meecargo.demo')!;
+  const { owner: owner1 } = await provisionSinglePlatformOwner();
 
   const business1 = await BusinessProfile.findOneAndUpdate(
     { ownerId: shipper1._id },
@@ -295,6 +309,7 @@ export async function seedDatabase(options: SeedOptions = {}) {
           },
         ],
         operatingDays: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'],
+        slotSchedules: DEFAULT_CORRIDOR_SLOT_SCHEDULES,
         isEstablishedRoute: true,
         guaranteedCeilingPaisePerKg: 550,
         baseRatePaisePerKg: 480,
@@ -310,34 +325,47 @@ export async function seedDatabase(options: SeedOptions = {}) {
   const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const datePrefix = tomorrow.toISOString().slice(0, 10);
 
-  const morningCutoff = new Date(tomorrow);
-  morningCutoff.setHours(7, 30, 0, 0);
-  const morningDeparture = new Date(tomorrow);
-  morningDeparture.setHours(9, 0, 0, 0);
-  const morningArrStart = new Date(tomorrow);
-  morningArrStart.setHours(12, 0, 0, 0);
-  const morningArrEnd = new Date(tomorrow);
-  morningArrEnd.setHours(13, 30, 0, 0);
+  const sched1 = corridor.slotSchedules.find((s) => s.slotNumber === 1) ?? DEFAULT_CORRIDOR_SLOT_SCHEDULES[0];
+  const sched2 = corridor.slotSchedules.find((s) => s.slotNumber === 2) ?? DEFAULT_CORRIDOR_SLOT_SCHEDULES[1];
 
-  const eveningCutoff = new Date(tomorrow);
-  eveningCutoff.setHours(15, 30, 0, 0);
+  const [s1DepH, s1DepM] = sched1.outboundPickupTime.split(':').map(Number);
+  const [s1Ret1H, s1Ret1M] = sched1.defaultReturnTime.split(':').map(Number);
+  const [s1Ret2H, s1Ret2M] = (sched1.returnTimeOptions[sched1.returnTimeOptions.length - 1] ?? '16:30')
+    .split(':')
+    .map(Number);
+
+  const morningDeparture = new Date(tomorrow);
+  morningDeparture.setHours(s1DepH, s1DepM, 0, 0);
+  const morningCutoff = new Date(morningDeparture.getTime() - 90 * 60 * 1000);
+  const morningArrStart = new Date(tomorrow);
+  morningArrStart.setHours(s1Ret1H, s1Ret1M, 0, 0);
+  const morningArrEnd = new Date(tomorrow);
+  morningArrEnd.setHours(s1Ret2H, s1Ret2M, 0, 0);
+
+  const [s2DepH, s2DepM] = sched2.outboundPickupTime.split(':').map(Number);
+  const [s2RetH, s2RetM] = (sched2.lockedReturnTime ?? '16:30').split(':').map(Number);
+
   const eveningDeparture = new Date(tomorrow);
-  eveningDeparture.setHours(17, 0, 0, 0);
+  eveningDeparture.setHours(s2DepH, s2DepM, 0, 0);
+  const eveningCutoff = new Date(eveningDeparture.getTime() - 90 * 60 * 1000);
   const eveningArrStart = new Date(tomorrow);
-  eveningArrStart.setHours(20, 0, 0, 0);
+  eveningArrStart.setHours(s2RetH, s2RetM, 0, 0);
   const eveningArrEnd = new Date(tomorrow);
-  eveningArrEnd.setHours(21, 30, 0, 0);
+  eveningArrEnd.setHours(s2RetH, s2RetM, 0, 0);
 
   const slots = [
     {
       corridorId: corridor._id,
-      slotCode: `GJ-VAD-AMD-01-${datePrefix}-AM`,
-      label: 'Morning Express Pool (09:00 Departure)',
+      slotNumber: 1 as const,
+      slotCode: `GJ-VAD-AMD-01-${datePrefix}-SLOT1`,
+      label: sched1.label,
       departureDate: tomorrow,
       cutoffAt: morningCutoff,
       plannedDepartureAt: morningDeparture,
       estimatedArrivalStartAt: morningArrStart,
       estimatedArrivalEndAt: morningArrEnd,
+      returnTimeOptions: sched1.returnTimeOptions,
+      returnTimeLocked: false,
       capacityWeightKg: 2500,
       capacityVolumeCbm: 12,
       reservedWeightKg: 0,
@@ -346,13 +374,17 @@ export async function seedDatabase(options: SeedOptions = {}) {
     },
     {
       corridorId: corridor._id,
-      slotCode: `GJ-VAD-AMD-01-${datePrefix}-PM`,
-      label: 'Evening Standard Pool (17:00 Departure)',
+      slotNumber: 2 as const,
+      slotCode: `GJ-VAD-AMD-01-${datePrefix}-SLOT2`,
+      label: sched2.label,
       departureDate: tomorrow,
       cutoffAt: eveningCutoff,
       plannedDepartureAt: eveningDeparture,
       estimatedArrivalStartAt: eveningArrStart,
       estimatedArrivalEndAt: eveningArrEnd,
+      returnTimeOptions: sched2.returnTimeOptions,
+      returnTimeLocked: true,
+      lockedReturnTime: sched2.lockedReturnTime,
       capacityWeightKg: 2500,
       capacityVolumeCbm: 12,
       reservedWeightKg: 0,
@@ -377,10 +409,12 @@ export async function seedDatabase(options: SeedOptions = {}) {
   const vehicles = [
     {
       registrationNumber: 'GJ-06-MC-1001',
-      operatorName: 'MeeCargo Attached Partner (Vadodara)',
+      operatorName: 'Ramesh Solanki (Driver-Owned)',
       driverId: driver1._id,
       tier: 'TIER_1' as const,
+      ownershipType: 'DRIVER_OWNED' as const,
       vehicleClass: '14ft Closed Body LCV',
+      bodyType: 'CLOSED_BODY' as const,
       maxWeightKg: 2500,
       maxVolumeCbm: 12.5,
       bedDimensionsCm: { length: 425, width: 195, height: 150 },
@@ -393,20 +427,29 @@ export async function seedDatabase(options: SeedOptions = {}) {
         fixedTripPaise: 0,
       },
       contractedCorridorIds: [corridor._id],
-      contractedSlotLabels: ['AM', 'PM'],
+      contractedSlotLabels: [],
       unavailableDates: [],
       blockedSlotIds: [],
       operatingRestrictions: [],
       supportsBackhaul: false,
       homeLocation: { type: 'Point' as const, coordinates: [73.1812, 22.3072] },
+      operationalStatus: 'ACTIVE' as const,
       isAvailable: true,
+      documents: {
+        rcNumber: 'GJ06MC1001',
+        insurancePolicyNumber: 'INS-GJ06-2026-1001',
+        verificationStatus: 'VERIFIED' as const,
+        verifiedAt: now,
+      },
     },
     {
       registrationNumber: 'GJ-06-MK-2044',
       operatorName: 'Charotar Fleet Marketplace',
       driverId: driver2._id,
       tier: 'TIER_2' as const,
+      ownershipType: 'MARKETPLACE' as const,
       vehicleClass: '8ft Mini Pickup',
+      bodyType: 'MINI_PICKUP' as const,
       maxWeightKg: 1200,
       maxVolumeCbm: 6.2,
       bedDimensionsCm: { length: 245, width: 155, height: 165 },
@@ -425,6 +468,7 @@ export async function seedDatabase(options: SeedOptions = {}) {
       operatingRestrictions: [],
       supportsBackhaul: false,
       homeLocation: { type: 'Point' as const, coordinates: [73.175, 22.295] },
+      operationalStatus: 'ACTIVE' as const,
       isAvailable: true,
     },
     {
@@ -432,7 +476,9 @@ export async function seedDatabase(options: SeedOptions = {}) {
       operatorName: 'Sabarmati Return Haul Partner',
       driverId: driver2._id,
       tier: 'TIER_3' as const,
+      ownershipType: 'MARKETPLACE' as const,
       vehicleClass: '17ft Backhaul Truck',
+      bodyType: 'CONTAINER' as const,
       maxWeightKg: 4000,
       maxVolumeCbm: 18.0,
       bedDimensionsCm: { length: 515, width: 205, height: 170 },
@@ -451,6 +497,7 @@ export async function seedDatabase(options: SeedOptions = {}) {
       operatingRestrictions: [],
       supportsBackhaul: true,
       homeLocation: { type: 'Point' as const, coordinates: [72.5714, 23.0225] },
+      operationalStatus: 'ACTIVE' as const,
       isAvailable: true,
     },
   ];
@@ -467,7 +514,7 @@ export async function seedDatabase(options: SeedOptions = {}) {
 
   const tier1Vehicle = vehicleDocs[0];
   const tier2Vehicle = vehicleDocs[1];
-  await DriverProfile.findOneAndUpdate(
+  const driver1Profile = await DriverProfile.findOneAndUpdate(
     { userId: driver1._id },
     {
       $set: {
@@ -475,7 +522,9 @@ export async function seedDatabase(options: SeedOptions = {}) {
         name: driver1.name,
         phone: driver1.phone ?? '+919800000201',
         availabilityStatus: 'AVAILABLE',
+        accountStatus: 'ACTIVE',
         fleetTier: 'TIER_1',
+        platformOwnerId: owner1._id,
         vehicleId: tier1Vehicle._id,
         licenseNumber: 'GJ06-2018-0045219',
         homeBase: 'Vadodara Makarpura Hub',
@@ -492,13 +541,73 @@ export async function seedDatabase(options: SeedOptions = {}) {
         name: driver2.name,
         phone: driver2.phone ?? '+919800000202',
         availabilityStatus: 'AVAILABLE',
+        accountStatus: 'ACTIVE',
         fleetTier: 'TIER_2',
         vehicleId: tier2Vehicle._id,
         licenseNumber: 'GJ06-2020-0088123',
         homeBase: 'Anand Charotar Hub',
       },
+      $unset: { platformOwnerId: '' },
     },
     { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+
+  const contractStart = new Date();
+  const contractEnd = new Date(contractStart.getTime() + 365 * 24 * 60 * 60 * 1000);
+  await DriverContract.findOneAndUpdate(
+    { contractCode: 'MC-CNT-DEMO-01' },
+    {
+      $setOnInsert: {
+        contractCode: 'MC-CNT-DEMO-01',
+        platformOwnerId: owner1._id,
+        driverProfileId: driver1Profile._id,
+        driverUserId: driver1._id,
+        startDate: contractStart,
+        endDate: contractEnd,
+        minimumGuaranteeTerms: {
+          minGuaranteePaise: 320000,
+          perKmRatePaise: 2400,
+          guaranteedMonthlyDays: 24,
+          notes: 'Tier 1 contracted corridor guarantee on GJ-VAD-AMD-01',
+        },
+        assignedVehicleId: tier1Vehicle._id,
+        eligibleCorridorIds: [corridor._id],
+        status: 'ACTIVE',
+        history: [
+          {
+            action: 'CONTRACT_CREATED',
+            status: 'ACTIVE',
+            actorUserId: owner1._id,
+            at: contractStart,
+            note: 'Initial Tier 1 corridor contract seeded',
+          },
+        ],
+      },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+
+  await migrateToSinglePlatformOwner({ canonicalOwnerId: owner1._id });
+
+  // Seed a live Slot 1 availability commitment for Ramesh while keeping Slot 2 open for selection
+  await DriverSlotCommitment.findOneAndUpdate(
+    { slotId: morningSlot._id, driverUserId: driver1._id },
+    {
+      $setOnInsert: {
+        corridorId: corridor._id,
+        slotId: morningSlot._id,
+        driverUserId: driver1._id,
+        driverProfileId: driver1Profile._id,
+        vehicleId: tier1Vehicle._id,
+        slotNumber: 1,
+        departureDate: morningSlot.departureDate,
+        selectedPickupTime: sched1.outboundPickupTime,
+        selectedReturnTime: sched1.defaultReturnTime,
+        status: 'COMMITTED',
+        committedAt: now,
+      },
+    },
+    { upsert: true, returnDocument: 'after' }
   );
 
   // Pre-seed two paid shipments into the open Morning (AM) pool + one locked PM shipment for Driver execution

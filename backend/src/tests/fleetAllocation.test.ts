@@ -1,6 +1,8 @@
 import { Types } from 'mongoose';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DriverContract } from '../models/DriverContract.js';
 import { DriverProfile } from '../models/DriverProfile.js';
+import { DriverSlotCommitment } from '../models/DriverSlotCommitment.js';
 import { NotificationLog } from '../models/NotificationLog.js';
 import { Trip } from '../models/Trip.js';
 import { Vehicle } from '../models/Vehicle.js';
@@ -73,11 +75,15 @@ describe('Stage 5 Fleet Tiers, Automated Allocation & Driver Assignment (MC-018 
   it('prioritizes Tier 1 for contracted corridors, preserves Tier 1 min guarantee, and restricts Tier 3 to backhaul', async () => {
     const corridorId = new Types.ObjectId();
     const slotId = new Types.ObjectId();
+    const driver1Id = new Types.ObjectId();
 
     const tier1 = {
       _id: new Types.ObjectId(),
       registrationNumber: 'GJ-06-MC-1001',
+      driverId: driver1Id,
       tier: 'TIER_1',
+      ownershipType: 'DRIVER_OWNED',
+      operationalStatus: 'ACTIVE',
       maxWeightKg: 2500,
       maxVolumeCbm: 12.5,
       bedDimensionsCm: { length: 425, width: 195, height: 150 },
@@ -153,6 +159,44 @@ describe('Stage 5 Fleet Tiers, Automated Allocation & Driver Assignment (MC-018 
       select: vi.fn().mockReturnValue({
         session: vi.fn().mockResolvedValue([]),
       }),
+    })) as never);
+    vi.spyOn(DriverProfile, 'find').mockImplementation((() => ({
+      session: vi.fn().mockResolvedValue([
+        {
+          userId: driver1Id,
+          fleetTier: 'TIER_1',
+          availabilityStatus: 'AVAILABLE',
+          accountStatus: 'ACTIVE',
+        },
+      ]),
+    })) as never);
+    vi.spyOn(DriverContract, 'find').mockImplementation((() => ({
+      session: vi.fn().mockResolvedValue([
+        {
+          driverUserId: driver1Id,
+          status: 'ACTIVE',
+          startDate: new Date('2026-01-01'),
+          endDate: new Date('2027-01-01'),
+          eligibleCorridorIds: [corridorId],
+          minimumGuaranteeTerms: { minGuaranteePaise: 320000, perKmRatePaise: 2400 },
+        },
+      ]),
+    })) as never);
+    vi.spyOn(DriverSlotCommitment, 'find').mockImplementation((() => ({
+      session: vi.fn().mockResolvedValue([
+        {
+          _id: new Types.ObjectId(),
+          corridorId,
+          slotId,
+          driverUserId: driver1Id,
+          driverProfileId: new Types.ObjectId(),
+          vehicleId: tier1._id,
+          slotNumber: 1,
+          selectedPickupTime: '09:00',
+          selectedReturnTime: '14:00',
+          status: 'COMMITTED',
+        },
+      ]),
     })) as never);
 
     const outcome = await allocateVehicleForPool({

@@ -78,6 +78,7 @@ Demo credentials (password for all accounts: **`Demo@1234`**):
 - **Shipper 3 (Kheda Ceramic & Hardware):** `shipper3@meecargo.demo`
 - **Driver 1 (Tier 1 Attached Vehicle `GJ-06-MC-1001`):** `driver1@meecargo.demo`
 - **Driver 2 (Tier 2 Marketplace Vehicle `GJ-06-MK-2044`):** `driver2@meecargo.demo`
+- **Platform Owner (Singleton Account managing all Tier 1 contracts):** `owner@meecargo.demo` (or configured via `PLATFORM_OWNER_EMAIL` / `PLATFORM_OWNER_PASSWORD` in `backend/.env`)
 
 What `seed:reset` prepares:
 - Fixed corridor **`GJ-VAD-AMD-01`** (`Vadodara → Anand → Nadiad → Ahmedabad`) with open `AM` and `PM` slots
