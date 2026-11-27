@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { isValidObjectId } from 'mongoose';
 import { z } from 'zod';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireRole } from '../middleware/auth.js';
 import { Corridor, type ICorridor } from '../models/Corridor.js';
 import { Pool } from '../models/Pool.js';
 import { Trip } from '../models/Trip.js';
@@ -9,6 +9,7 @@ import { executePoolCutoff } from '../services/cutoffService.js';
 import { allocateAndAssignTripForPool } from '../services/driverAssignment.js';
 import { buildPoolLiveEvent } from '../services/poolService.js';
 import { getActivePricingRules } from '../services/pricingEngine.js';
+import { calculateAndPersistTripLedger } from '../services/tripEconomicsService.js';
 import { HttpError } from '../utils/errors.js';
 
 const router = Router();
@@ -130,6 +131,20 @@ router.post('/:poolId/allocate', async (req, res) => {
     success: true,
     ...result,
   });
+});
+
+// Internal trip economics ledger: strictly blocked for SHIPPER role (MC-034)
+router.get('/:poolId/ledger', requireRole('DRIVER'), async (req, res) => {
+  const poolId = Array.isArray(req.params.poolId) ? req.params.poolId[0] : req.params.poolId;
+  if (!isValidObjectId(poolId)) {
+    throw new HttpError(400, 'Invalid pool ID', 'VALIDATION_ERROR');
+  }
+  const trip = await Trip.findOne({ poolId });
+  if (!trip) {
+    throw new HttpError(404, 'No trip created for this pool yet', 'NOT_FOUND');
+  }
+  const ledger = await calculateAndPersistTripLedger(String(trip._id));
+  res.json({ success: true, ledger });
 });
 
 export default router;
