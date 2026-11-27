@@ -1,122 +1,127 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useEffect } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { fetchMe } from './api/client';
+import { RoleGuard } from './components/guards/RoleGuard';
+import { DriverLayout } from './layouts/DriverLayout';
+import { PublicTrackLayout } from './layouts/PublicTrackLayout';
+import { ShipperLayout } from './layouts/ShipperLayout';
+import { LandingPage } from './pages/LandingPage';
+import { LoginPage } from './pages/LoginPage';
+import { NotFoundPage } from './pages/NotFoundPage';
+import { RegisterPage } from './pages/RegisterPage';
+import { DriverProfilePage } from './pages/driver/DriverProfilePage';
+import { DriverSectionPlaceholder } from './pages/driver/DriverSectionPlaceholder';
+import { DriverTripsPage } from './pages/driver/DriverTripsPage';
+import { BookShipmentPage } from './pages/shipper/BookShipmentPage';
+import { BusinessProfilePage } from './pages/shipper/BusinessProfilePage';
+import { CorridorsPage } from './pages/shipper/CorridorsPage';
+import { CsvImportPage } from './pages/shipper/CsvImportPage';
+import { ShipmentsHistoryPage } from './pages/shipper/ShipmentsHistoryPage';
+import { ShipperDashboardPage } from './pages/shipper/ShipperDashboardPage';
+import { PublicTrackingPage } from './pages/track/PublicTrackingPage';
+import { useAuthStore } from './stores/authStore';
 
-function App() {
-  const [count, setCount] = useState(0)
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 15_000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+function SessionBootstrapper() {
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const setUser = useAuthStore((s) => s.setUser);
+  const setInitialized = useAuthStore((s) => s.setInitialized);
+  const logout = useAuthStore((s) => s.logout);
 
-      <div className="ticks"></div>
+  useEffect(() => {
+    if (!accessToken) {
+      setInitialized(true);
+      return;
+    }
+    let cancelled = false;
+    fetchMe()
+      .then((res) => {
+        if (!cancelled) {
+          setUser({
+            ...res.user,
+            businessName: res.businessProfile?.businessName,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          logout();
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, setUser, setInitialized, logout]);
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+  return null;
 }
 
-export default App
+export function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <SessionBootstrapper />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+
+          <Route
+            path="/shipper"
+            element={
+              <RoleGuard allowedRole="SHIPPER">
+                <ShipperLayout />
+              </RoleGuard>
+            }
+          >
+            <Route index element={<ShipperDashboardPage />} />
+            <Route path="book" element={<BookShipmentPage />} />
+            <Route path="corridors" element={<CorridorsPage />} />
+            <Route path="shipments" element={<ShipmentsHistoryPage />} />
+            <Route path="import" element={<CsvImportPage />} />
+            <Route path="profile" element={<BusinessProfilePage />} />
+          </Route>
+
+          <Route
+            path="/driver"
+            element={
+              <RoleGuard allowedRole="DRIVER">
+                <DriverLayout />
+              </RoleGuard>
+            }
+          >
+            <Route index element={<DriverTripsPage />} />
+            <Route
+              path="scan"
+              element={
+                <DriverSectionPlaceholder
+                  title="QR Pickup Verification"
+                  stageLabel="Stage 7 (MC-027)"
+                  description="Scan shipment QR codes to verify manifest loading and pickup events."
+                />
+              }
+            />
+            <Route path="profile" element={<DriverProfilePage />} />
+          </Route>
+
+          <Route path="/track" element={<PublicTrackLayout />}>
+            <Route path=":trackingToken" element={<PublicTrackingPage />} />
+          </Route>
+
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
+}
+
+export default App;
