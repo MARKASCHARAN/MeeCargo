@@ -28,7 +28,18 @@ export function RoleGuard({
   }
 
   if (user.role !== allowedRole) {
-    const ownPortal = user.role === 'SHIPPER' ? '/shipper' : '/driver';
+    const ownPortal =
+      user.role === 'SHIPPER'
+        ? '/shipper'
+        : user.role === 'PLATFORM_OWNER'
+          ? '/owner'
+          : '/driver';
+    const ownLabel =
+      user.role === 'SHIPPER'
+        ? 'Shipper Portal'
+        : user.role === 'PLATFORM_OWNER'
+          ? 'Platform Owner Portal'
+          : 'Driver PWA';
     return (
       <div className="flex min-h-[70vh] items-center justify-center p-4">
         <UnauthorizedState
@@ -38,7 +49,7 @@ export function RoleGuard({
             <>
               <Link to={ownPortal}>
                 <Button variant="primary" size="sm">
-                  Go to {user.role === 'SHIPPER' ? 'Shipper Portal' : 'Driver PWA'}
+                  Go to {ownLabel}
                 </Button>
               </Link>
               <Button variant="outline" size="sm" onClick={logout}>

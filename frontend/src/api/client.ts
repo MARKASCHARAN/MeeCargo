@@ -6,18 +6,29 @@ import type {
   CargoCategory,
   CargoPreset,
   Corridor,
+  CorridorFacets,
+  CorridorScheduleRecord,
+  CorridorSlotSchedule,
   CsvImportReport,
   DimensionUnit,
   DriverAvailability,
+  DriverContractRecord,
+  DriverContractStatus,
+  DriverAccountStatus,
   DriverNotification,
+  DriverOwnedVehicleRecord,
+  DriverPoolingSlotsResponse,
   DriverProfile,
+  DriverSlotCommitmentRecord,
   ExceptionRecord,
   GeocodeResult,
   HealthResponse,
+  ManagedContractDriver,
   MeResponse,
   OperationalImpactMetrics,
   PaymentChoice,
   PaymentRecord,
+  PlatformOwnerCatalog,
   PoolSummary,
   PriceCalculationBreakdown,
   PublicTrackingResponse,
@@ -25,6 +36,8 @@ import type {
   StructuredAddress,
   TripSummary,
   UserRole,
+  VehicleBodyType,
+  VehicleOperationalStatus,
   WeightUnit,
 } from '../types/api';
 
@@ -729,5 +742,263 @@ export function resolveShipmentException(
   return apiFetch(`/api/v1/shipments/exceptions/${exceptionId}/resolve`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+export interface DriverOwnedVehiclePayload {
+  registrationNumber: string;
+  vehicleCategory: string;
+  bodyType: VehicleBodyType;
+  maxWeightKg: number;
+  bedLengthCm: number;
+  bedWidthCm: number;
+  bedHeightCm: number;
+  maxVolumeCbm?: number;
+  operationalStatus: VehicleOperationalStatus;
+  rcNumber?: string;
+  insurancePolicyNumber?: string;
+  permitNotes?: string;
+  verificationStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
+}
+
+export function fetchPlatformOwnerCatalog(): Promise<{
+  success: boolean;
+} & PlatformOwnerCatalog> {
+  return apiFetch('/api/v1/platform-owner/catalog');
+}
+
+export function fetchPlatformOwnerDrivers(
+  status?: DriverAccountStatus
+): Promise<{ success: boolean; drivers: ManagedContractDriver[] }> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : '';
+  return apiFetch(`/api/v1/platform-owner/drivers${query}`);
+}
+
+export function registerPlatformOwnerDriver(payload: {
+  name: string;
+  email: string;
+  phone: string;
+  password: string;
+  licenseNumber?: string;
+  homeBase?: string;
+  startDate: string;
+  endDate: string;
+  minGuaranteePaise: number;
+  perKmRatePaise: number;
+  guaranteedMonthlyDays?: number;
+  notes?: string;
+  eligibleCorridorIds: string[];
+  vehicle: DriverOwnedVehiclePayload;
+}): Promise<{
+  success: boolean;
+  contract: DriverContractRecord;
+  driverOwnedVehicle: DriverOwnedVehicleRecord;
+}> {
+  return apiFetch('/api/v1/platform-owner/drivers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function upsertDriverOwnedVehicle(
+  driverProfileId: string,
+  payload: DriverOwnedVehiclePayload
+): Promise<{ success: boolean; driverOwnedVehicle: DriverOwnedVehicleRecord }> {
+  return apiFetch(`/api/v1/platform-owner/drivers/${driverProfileId}/vehicle`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateContractDriverStatus(
+  driverProfileId: string,
+  payload: { accountStatus: DriverAccountStatus; reason?: string }
+): Promise<{ success: boolean }> {
+  return apiFetch(`/api/v1/platform-owner/drivers/${driverProfileId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resetContractDriverPassword(
+  driverProfileId: string,
+  password: string
+): Promise<{ success: boolean; driverProfileId: string; driverUserId: string }> {
+  return apiFetch(`/api/v1/platform-owner/drivers/${driverProfileId}/password`, {
+    method: 'PATCH',
+    body: JSON.stringify({ password }),
+  });
+}
+
+export function saveDriverContract(
+  driverProfileId: string,
+  payload: {
+    contractId?: string;
+    startDate: string;
+    endDate: string;
+    minGuaranteePaise: number;
+    perKmRatePaise: number;
+    guaranteedMonthlyDays?: number;
+    notes?: string;
+    eligibleCorridorIds: string[];
+    status: DriverContractStatus;
+    changeNote?: string;
+  }
+): Promise<{ success: boolean; contract: DriverContractRecord }> {
+  if (payload.contractId) {
+    const { contractId, ...rest } = payload;
+    return apiFetch(
+      `/api/v1/platform-owner/drivers/${driverProfileId}/contracts/${contractId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(rest),
+      }
+    );
+  }
+  return apiFetch(`/api/v1/platform-owner/drivers/${driverProfileId}/contracts`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface CorridorListFilters {
+  status?: 'ALL' | 'ACTIVE' | 'INACTIVE';
+  origin?: string;
+  destination?: string;
+  operatingDay?: string;
+  q?: string;
+  sortBy?: 'name' | 'code' | 'updatedAt';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface CorridorStopPayload {
+  stopCode: string;
+  name: string;
+  district: string;
+  state: string;
+  sequenceOrder: number;
+  location: {
+    type: 'Point';
+    coordinates: [number, number];
+  };
+}
+
+export interface CreateCorridorPayload {
+  code: string;
+  name: string;
+  description?: string;
+  stops: CorridorStopPayload[];
+  operatingDays: string[];
+  slotSchedules: CorridorSlotSchedule[];
+  guaranteedCeilingPaisePerKg: number;
+  baseRatePaisePerKg: number;
+  viabilityThresholdPct?: number;
+  isActive?: boolean;
+  generateInitialDaysAhead?: number;
+}
+
+export interface UpdateCorridorPayload {
+  name?: string;
+  description?: string;
+  stops?: CorridorStopPayload[];
+  operatingDays?: string[];
+  slotSchedules?: CorridorSlotSchedule[];
+  guaranteedCeilingPaisePerKg?: number;
+  baseRatePaisePerKg?: number;
+  viabilityThresholdPct?: number;
+}
+
+export function fetchOwnerCorridors(filters: CorridorListFilters = {}): Promise<{
+  success: boolean;
+  corridors: CorridorScheduleRecord[];
+  facets: CorridorFacets;
+}> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.origin) params.set('origin', filters.origin);
+  if (filters.destination) params.set('destination', filters.destination);
+  if (filters.operatingDay) params.set('operatingDay', filters.operatingDay);
+  if (filters.q) params.set('q', filters.q);
+  if (filters.sortBy) params.set('sortBy', filters.sortBy);
+  if (filters.sortOrder) params.set('sortOrder', filters.sortOrder);
+  const qs = params.toString();
+  return apiFetch(`/api/v1/platform-owner/corridors${qs ? `?${qs}` : ''}`);
+}
+
+export function createOwnerCorridor(payload: CreateCorridorPayload): Promise<{
+  success: boolean;
+  corridor: CorridorScheduleRecord;
+  createdOpenSlotsCount: number;
+}> {
+  return apiFetch('/api/v1/platform-owner/corridors', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateOwnerCorridor(
+  corridorId: string,
+  payload: UpdateCorridorPayload
+): Promise<{
+  success: boolean;
+  corridor: CorridorScheduleRecord;
+  syncedOpenSlotsCount: number;
+}> {
+  return apiFetch(`/api/v1/platform-owner/corridors/${corridorId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function toggleOwnerCorridorStatus(
+  corridorId: string,
+  isActive: boolean
+): Promise<{
+  success: boolean;
+  corridor: CorridorScheduleRecord;
+  createdOpenSlotsCount: number;
+}> {
+  return apiFetch(`/api/v1/platform-owner/corridors/${corridorId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isActive }),
+  });
+}
+
+export function updateCentralCorridorSchedule(
+  corridorId: string,
+  payload: {
+    operatingDays?: string[];
+    slotSchedules: CorridorSlotSchedule[];
+  }
+): Promise<{
+  success: boolean;
+  corridor: CorridorScheduleRecord;
+  syncedOpenSlotsCount: number;
+}> {
+  return apiFetch(`/api/v1/platform-owner/corridors/${corridorId}/schedule`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchDriverPoolingSlots(): Promise<DriverPoolingSlotsResponse> {
+  return apiFetch('/api/v1/driver/pooling-slots');
+}
+
+export function commitDriverPoolingSlot(
+  slotId: string,
+  selectedReturnTime?: string
+): Promise<{ success: boolean; commitment: DriverSlotCommitmentRecord }> {
+  return apiFetch(`/api/v1/driver/pooling-slots/${slotId}/commit`, {
+    method: 'POST',
+    body: JSON.stringify(selectedReturnTime ? { selectedReturnTime } : {}),
+  });
+}
+
+export function withdrawDriverPoolingSlot(
+  slotId: string
+): Promise<{ success: boolean; commitment: DriverSlotCommitmentRecord }> {
+  return apiFetch(`/api/v1/driver/pooling-slots/${slotId}/commit`, {
+    method: 'DELETE',
   });
 }

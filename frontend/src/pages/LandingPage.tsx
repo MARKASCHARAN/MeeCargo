@@ -52,7 +52,17 @@ export function LandingPage() {
               </Badge>
             )}
 
-            <Link to={user ? (user.role === 'SHIPPER' ? '/shipper' : '/driver') : '/login'}>
+            <Link
+              to={
+                user
+                  ? user.role === 'SHIPPER'
+                    ? '/shipper'
+                    : user.role === 'PLATFORM_OWNER'
+                      ? '/owner'
+                      : '/driver'
+                  : '/login'
+              }
+            >
               <Button size="sm" variant="secondary">
                 {user ? 'Open Portal' : 'Sign in'}
               </Button>

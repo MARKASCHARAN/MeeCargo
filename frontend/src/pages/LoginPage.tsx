@@ -43,7 +43,12 @@ export function LoginPage() {
         accessToken: res.accessToken,
         refreshToken: res.refreshToken,
       });
-      const defaultTarget = res.user.role === 'SHIPPER' ? '/shipper' : '/driver';
+      const defaultTarget =
+        res.user.role === 'SHIPPER'
+          ? '/shipper'
+          : res.user.role === 'PLATFORM_OWNER'
+            ? '/owner'
+            : '/driver';
       navigate(
         redirectFrom && redirectFrom.startsWith(defaultTarget)
           ? redirectFrom
@@ -77,10 +82,10 @@ export function LoginPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold text-slate-900">Sign in to MeeCargo</h1>
-            <Badge variant="info">Shipper & Driver</Badge>
+            <Badge variant="info">Shipper • Driver • Owner</Badge>
           </div>
           <p className="mt-1 text-sm text-slate-500">
-            Access your shipper booking portal or driver execution PWA.
+            Access your shipper booking portal, driver PWA, or the single Platform Owner console.
           </p>
         </CardHeader>
 
@@ -89,7 +94,15 @@ export function LoginPage() {
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
               Currently signed in as <strong>{user.name}</strong> ({user.role}).
               <div className="mt-2 flex gap-2">
-                <Link to={user.role === 'SHIPPER' ? '/shipper' : '/driver'}>
+                <Link
+                  to={
+                    user.role === 'SHIPPER'
+                      ? '/shipper'
+                      : user.role === 'PLATFORM_OWNER'
+                        ? '/owner'
+                        : '/driver'
+                  }
+                >
                   <Button size="sm" variant="primary">
                     Continue to portal
                   </Button>
@@ -170,6 +183,14 @@ export function LoginPage() {
                 onClick={() => fillDemo('driver1@meecargo.demo')}
               >
                 Demo Driver
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => fillDemo('owner@meecargo.demo')}
+              >
+                Platform Owner
               </Button>
             </div>
           </div>

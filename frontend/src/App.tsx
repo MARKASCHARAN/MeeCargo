@@ -4,15 +4,19 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { fetchMe } from './api/client';
 import { RoleGuard } from './components/guards/RoleGuard';
 import { DriverLayout } from './layouts/DriverLayout';
+import { PlatformOwnerLayout } from './layouts/PlatformOwnerLayout';
 import { PublicTrackLayout } from './layouts/PublicTrackLayout';
 import { ShipperLayout } from './layouts/ShipperLayout';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { DriverPoolingSlotsPage } from './pages/driver/DriverPoolingSlotsPage';
 import { DriverProfilePage } from './pages/driver/DriverProfilePage';
 import { DriverScanPage } from './pages/driver/DriverScanPage';
 import { DriverTripsPage } from './pages/driver/DriverTripsPage';
+import { CorridorSchedulesPage } from './pages/owner/CorridorSchedulesPage';
+import { PlatformOwnerDriversPage } from './pages/owner/PlatformOwnerDriversPage';
 import { BookShipmentPage } from './pages/shipper/BookShipmentPage';
 import { BusinessProfilePage } from './pages/shipper/BusinessProfilePage';
 import { CorridorsPage } from './pages/shipper/CorridorsPage';
@@ -100,8 +104,21 @@ export function App() {
             }
           >
             <Route index element={<DriverTripsPage />} />
+            <Route path="slots" element={<DriverPoolingSlotsPage />} />
             <Route path="scan" element={<DriverScanPage />} />
             <Route path="profile" element={<DriverProfilePage />} />
+          </Route>
+
+          <Route
+            path="/owner"
+            element={
+              <RoleGuard allowedRole="PLATFORM_OWNER">
+                <PlatformOwnerLayout />
+              </RoleGuard>
+            }
+          >
+            <Route index element={<PlatformOwnerDriversPage />} />
+            <Route path="corridors" element={<CorridorSchedulesPage />} />
           </Route>
 
           <Route path="/track" element={<PublicTrackLayout />}>

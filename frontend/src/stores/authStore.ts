@@ -34,7 +34,9 @@ function readStoredSession(): {
     if (
       parsed?.user &&
       parsed?.accessToken &&
-      (parsed.user.role === 'SHIPPER' || parsed.user.role === 'DRIVER')
+      (parsed.user.role === 'SHIPPER' ||
+        parsed.user.role === 'DRIVER' ||
+        parsed.user.role === 'PLATFORM_OWNER')
     ) {
       return {
         user: parsed.user,

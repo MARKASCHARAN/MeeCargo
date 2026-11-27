@@ -1,4 +1,4 @@
-export type UserRole = 'SHIPPER' | 'DRIVER';
+export type UserRole = 'SHIPPER' | 'DRIVER' | 'PLATFORM_OWNER';
 
 export type BusinessType =
   | 'MANUFACTURER'
@@ -637,4 +637,232 @@ export interface ExceptionRecord {
   reassignedTripId?: string;
   routeRecalculated?: boolean;
   createdAt: string;
+}
+
+export type DriverAccountStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+export type DriverContractStatus =
+  | 'DRAFT'
+  | 'ACTIVE'
+  | 'SUSPENDED'
+  | 'INACTIVE'
+  | 'EXPIRED'
+  | 'TERMINATED';
+
+export type VehicleOwnershipType = 'DRIVER_OWNED' | 'MARKETPLACE';
+export type VehicleBodyType =
+  | 'CLOSED_BODY'
+  | 'OPEN_BODY'
+  | 'CONTAINER'
+  | 'FLATBED'
+  | 'MINI_PICKUP';
+export type VehicleOperationalStatus =
+  | 'ACTIVE'
+  | 'INACTIVE'
+  | 'MAINTENANCE'
+  | 'SUSPENDED';
+
+export interface DriverOwnedVehicleRecord {
+  _id: string;
+  registrationNumber: string;
+  operatorName: string;
+  tier: FleetTier;
+  ownershipType: VehicleOwnershipType;
+  vehicleClass: string;
+  bodyType: VehicleBodyType;
+  maxWeightKg: number;
+  maxVolumeCbm: number;
+  bedDimensionsCm: {
+    length: number;
+    width: number;
+    height: number;
+  };
+  operationalStatus: VehicleOperationalStatus;
+  isAvailable: boolean;
+  documents?: {
+    rcNumber?: string;
+    insurancePolicyNumber?: string;
+    insuranceValidUntil?: string;
+    fitnessValidUntil?: string;
+    permitNotes?: string;
+    verificationStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  };
+}
+
+export interface CorridorSlotSchedule {
+  slotNumber: 1 | 2;
+  slotCodeSuffix: string;
+  label: string;
+  outboundPickupTime: string;
+  returnTimeOptions: string[];
+  defaultReturnTime: string;
+  returnTimeLocked: boolean;
+  lockedReturnTime?: string;
+}
+
+export interface CorridorStopSummary {
+  stopCode: string;
+  name: string;
+  district?: string;
+  state?: string;
+  sequenceOrder: number;
+  location?: {
+    type: 'Point';
+    coordinates: [number, number];
+  };
+}
+
+export interface CorridorScheduleRecord {
+  _id: string;
+  code: string;
+  name: string;
+  description?: string;
+  isActive?: boolean;
+  operatingDays: string[];
+  stops: CorridorStopSummary[];
+  slotSchedules: CorridorSlotSchedule[];
+  guaranteedCeilingPaisePerKg?: number;
+  baseRatePaisePerKg?: number;
+  viabilityThresholdPct?: number;
+  updatedAt?: string;
+}
+
+export interface CorridorFacets {
+  origins: string[];
+  destinations: string[];
+  totalCount: number;
+  activeCount: number;
+  inactiveCount: number;
+}
+
+export type DriverSlotCommitmentStatus =
+  | 'COMMITTED'
+  | 'WITHDRAWN'
+  | 'ALLOCATED'
+  | 'EXPIRED'
+  | 'INVALIDATED';
+
+export interface DriverSlotCommitmentRecord {
+  _id: string;
+  corridorId:
+    | string
+    | {
+        _id: string;
+        code: string;
+        name: string;
+      };
+  slotId:
+    | string
+    | {
+        _id: string;
+        slotCode: string;
+        label: string;
+        departureDate: string;
+        cutoffAt: string;
+        status: string;
+      };
+  poolId?: string;
+  slotNumber: 1 | 2;
+  departureDate: string;
+  selectedPickupTime: string;
+  selectedReturnTime: string;
+  status: DriverSlotCommitmentStatus;
+  invalidationReason?: string;
+  committedAt: string;
+  withdrawnAt?: string;
+  allocatedAt?: string;
+}
+
+export interface DriverPoolingSlotItem {
+  slotId: string;
+  slotCode: string;
+  slotNumber: 1 | 2;
+  label: string;
+  departureDate: string;
+  cutoffAt: string;
+  plannedDepartureAt: string;
+  corridor: {
+    _id: string;
+    code: string;
+    name: string;
+    stops: CorridorStopSummary[];
+  };
+  template: {
+    outboundPickupTime: string;
+    returnTimeOptions: string[];
+    defaultReturnTime: string;
+    returnTimeLocked: boolean;
+    lockedReturnTime?: string;
+  };
+  poolSummary: {
+    poolId: string;
+    poolCode: string;
+    status: string;
+    shipmentCount: number;
+    reservedWeightKg: number;
+    reservedVolumeCbm: number;
+  } | null;
+  commitment: DriverSlotCommitmentRecord | null;
+}
+
+export interface DriverPoolingSlotsResponse {
+  success: boolean;
+  eligible: boolean;
+  ineligibleReason?: string;
+  vehicle?: {
+    _id: string;
+    registrationNumber: string;
+    vehicleClass: string;
+    maxWeightKg: number;
+    maxVolumeCbm: number;
+  };
+  slots: DriverPoolingSlotItem[];
+  commitments: DriverSlotCommitmentRecord[];
+}
+
+export interface DriverContractRecord {
+  _id: string;
+  contractCode: string;
+  platformOwnerId: string;
+  driverProfileId: string;
+  driverUserId: string;
+  startDate: string;
+  endDate: string;
+  minimumGuaranteeTerms: {
+    minGuaranteePaise: number;
+    perKmRatePaise: number;
+    guaranteedMonthlyDays?: number;
+    notes?: string;
+  };
+  assignedVehicleId?: DriverOwnedVehicleRecord | null;
+  eligibleCorridorIds: CorridorScheduleRecord[];
+  status: DriverContractStatus;
+  history: Array<{
+    action: string;
+    status: DriverContractStatus;
+    actorUserId: string;
+    at: string;
+    note?: string;
+  }>;
+  createdAt: string;
+}
+
+export interface ManagedContractDriver {
+  driverProfile: DriverProfile & {
+    accountStatus: DriverAccountStatus;
+    platformOwnerId: string;
+    userId?: {
+      _id: string;
+      name: string;
+      email: string;
+      phone?: string;
+      isActive: boolean;
+    };
+  };
+  driverOwnedVehicle: DriverOwnedVehicleRecord | null;
+  activeContract: DriverContractRecord | null;
+  contracts: DriverContractRecord[];
+}
+
+export interface PlatformOwnerCatalog {
+  corridors: CorridorScheduleRecord[];
 }
