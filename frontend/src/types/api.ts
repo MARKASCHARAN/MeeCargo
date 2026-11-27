@@ -224,6 +224,20 @@ export interface Shipment {
   externalOrderRef?: string;
   trackingToken: string;
   qrToken: string;
+  podSummary?: {
+    confirmationMode: string;
+    verifiedAt: string;
+    b2bSignOffName?: string;
+    photoUrl: string | null;
+  } | null;
+  pickupCollectionSummary?: {
+    collectionState: string;
+    settlementState: string;
+    collectedAmountPaise: number;
+    paymentMethod: string;
+    providerRef: string;
+    isSimulated: boolean;
+  } | null;
   statusHistory: Array<{
     status: ShipmentStatus;
     at: string;
@@ -407,11 +421,157 @@ export interface TripSummary {
     rightSized: boolean;
     reason: string;
   };
+  routePlan?: {
+    optimizationStatus: 'PENDING' | 'OPTIMAL' | 'INFEASIBLE' | 'OPTIMIZER_UNAVAILABLE';
+    provider: 'OR_TOOLS' | 'NONE';
+    matrixProvider: 'FIXTURE' | 'OSRM';
+    totalDistanceMeters: number;
+    estimatedDurationSeconds: number;
+    orderedStops: Array<{
+      sequence: number;
+      stopCode: string;
+      name: string;
+      arrivalMin: number;
+      cumulativeDistanceMeters: number;
+      shipmentIds: string[];
+    }>;
+    failureReason?: string;
+    optimizedAt?: string;
+  };
+  loadingPlan?: {
+    zoneMapping: Array<{
+      stopCode: string;
+      dropSequence: number;
+      zoneColor: 'GREEN' | 'YELLOW' | 'RED' | 'BLUE';
+      zoneLabel: string;
+    }>;
+    sequenceItems: Array<{
+      loadOrder: number;
+      shipmentId: string;
+      reference: string;
+      stopCode: string;
+      dropSequence: number;
+      zoneColor: 'GREEN' | 'YELLOW' | 'RED' | 'BLUE';
+      zoneLabel: string;
+      quantity: number;
+      dimensionsCm: { length: number; width: number; height: number };
+      weightKg: number;
+      stackable: boolean;
+      handlingNotes?: string;
+      placed: boolean;
+      bedRect?: {
+        xCm: number;
+        yCm: number;
+        lengthCm: number;
+        widthCm: number;
+      };
+    }>;
+    overflowShipmentIds: string[];
+    manualOverrides: Array<{
+      shipmentId: string;
+      note: string;
+      at: string;
+    }>;
+    planningAidDisclaimer: string;
+  };
+  backhaulDecision?: {
+    decision: 'MATCHED' | 'EARLY_TURNAROUND' | 'PENDING';
+    requestCode?: string;
+    repositioningDistanceKm: number;
+    repositioningCostPaise: number;
+    expectedReturnRevenuePaise: number;
+    netContributionPaise: number;
+    tier1MinGuaranteeIncludedPaise: number;
+    reason: string;
+  };
   stopsSummary: Array<{
     stopCode: string;
     name: string;
     sequenceOrder: number;
   }>;
+  shipmentIds?: Array<{
+    _id: string;
+    reference: string;
+    deliveryStopCode: string;
+    recipientName: string;
+    status: ShipmentStatus;
+    qrToken: string;
+    allowB2bWarehouseConfirm: boolean;
+    deliveryAddress: StructuredAddress;
+    cargo: {
+      category: CargoCategory;
+      quantity: number;
+      chargeableWeightKg: number;
+      declaredContents: string;
+      handlingNotes?: string;
+    };
+    pricingSnapshot?: {
+      remainingBalancePaise?: number;
+    };
+  }>;
+}
+
+export interface PublicTrackingResponse {
+  success: boolean;
+  tracking: {
+    reference: string;
+    status: ShipmentStatus;
+    corridorName: string;
+    pickupStopCode: string;
+    deliveryStopCode: string;
+    destinationTown: string;
+    destinationDistrict: string;
+    cargoSummary: {
+      category: CargoCategory;
+      quantity: number;
+      declaredContents: string;
+    };
+    estimatedArrivalWindow: {
+      startAt: string;
+      endAt: string;
+      slotLabel: string;
+    } | null;
+    milestones: Array<{
+      status: ShipmentStatus;
+      at: string;
+      note?: string;
+    }>;
+    deliveryProof: {
+      verifiedAt: string;
+      confirmationMode: string;
+      photoUrl: string | null;
+    } | null;
+  };
+}
+
+export interface OperationalImpactMetrics {
+  shipperScoped: {
+    totalBookings: number;
+    deliveredCount: number;
+    activeCount: number;
+    failedCount: number;
+    cancelledCount: number;
+    totalActualOrProjectedSpendPaise: number;
+    totalCeilingBaselinePaise: number;
+    estimatedSavingsPaise: number;
+    estimatedSavingsPct: number;
+    baselineMethodology: string;
+    isEstimated: true;
+  };
+  platformUtilization: {
+    tripsCount: number;
+    avgVehicleWeightUtilizationPct: number;
+    avgVehicleVolumeUtilizationPct: number;
+    avgPoolFillLevelPct: number;
+    totalRoadDistanceKm: number;
+    emptyReturnDistanceKm: number;
+    costPerSuccessfulShipmentPaise: number | null;
+    onTimeDeliveryRatePct: number | null;
+    failedDeliveryRatePct: number;
+    estimatedCo2ImpactKg: number | null;
+    co2Methodology: string;
+    isIllustrativeDemoData: true;
+  };
 }
 
 export interface DriverNotification {
@@ -453,4 +613,28 @@ export interface HealthResponse {
     notifications: 'CONSOLE' | 'WEBHOOK';
   };
   timestamp: string;
+}
+
+export type ExceptionType =
+  | 'CUSTOMER_UNAVAILABLE'
+  | 'INCORRECT_ADDRESS'
+  | 'VEHICLE_BREAKDOWN'
+  | 'ROAD_BLOCKED'
+  | 'SHIPMENT_DAMAGED'
+  | 'RECIPIENT_REFUSES'
+  | 'DRIVER_UNAVAILABLE'
+  | 'PARTIAL_DELIVERY'
+  | 'PICKUP_FAILURE'
+  | 'ROUTE_INFEASIBILITY';
+
+export interface ExceptionRecord {
+  _id: string;
+  tripId?: string;
+  shipmentId?: string;
+  exceptionType: ExceptionType;
+  reason: string;
+  resolutionStatus: 'OPEN' | 'RESCHEDULED' | 'RETURNED' | 'REASSIGNED' | 'RESOLVED';
+  reassignedTripId?: string;
+  routeRecalculated?: boolean;
+  createdAt: string;
 }

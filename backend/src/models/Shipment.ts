@@ -12,8 +12,10 @@ export type ShipmentStatus =
   | 'PICKED_UP'
   | 'IN_TRANSIT'
   | 'AT_DESTINATION'
+  | 'PARTIALLY_DELIVERED'
   | 'DELIVERED'
   | 'FAILED'
+  | 'RETURNED'
   | 'CANCELLED'
   | 'ROLLED_OVER';
 
@@ -103,7 +105,12 @@ export interface IShipment extends Document {
   idempotencyKey?: string;
   externalOrderRef?: string;
   trackingToken: string;
+  trackingTokenExpiresAt?: Date;
+  trackingTokenRevokedAt?: Date;
   qrToken: string;
+  pickupVerifiedAt?: Date;
+  pickupBalanceRequestedAt?: Date;
+  allowB2bWarehouseConfirm: boolean;
   statusHistory: ShipmentStatusEvent[];
   createdAt: Date;
   updatedAt: Date;
@@ -115,11 +122,13 @@ const ALLOWED_SHIPMENT_TRANSITIONS: Record<ShipmentStatus, ShipmentStatus[]> = {
   CONFIRMED: ['POOLED', 'CANCELLED', 'ROLLED_OVER'],
   POOLED: ['LOCKED', 'CANCELLED', 'ROLLED_OVER'],
   LOCKED: ['PICKED_UP', 'FAILED', 'CANCELLED'],
-  PICKED_UP: ['IN_TRANSIT', 'FAILED'],
-  IN_TRANSIT: ['AT_DESTINATION', 'FAILED'],
-  AT_DESTINATION: ['DELIVERED', 'FAILED'],
+  PICKED_UP: ['IN_TRANSIT', 'PARTIALLY_DELIVERED', 'FAILED'],
+  IN_TRANSIT: ['AT_DESTINATION', 'PARTIALLY_DELIVERED', 'FAILED'],
+  AT_DESTINATION: ['DELIVERED', 'PARTIALLY_DELIVERED', 'FAILED'],
+  PARTIALLY_DELIVERED: ['DELIVERED', 'RETURNED', 'FAILED'],
   DELIVERED: [],
-  FAILED: ['ROLLED_OVER', 'CANCELLED'],
+  FAILED: ['ROLLED_OVER', 'RETURNED', 'POOLED', 'CANCELLED'],
+  RETURNED: [],
   CANCELLED: [],
   ROLLED_OVER: ['POOLED', 'CANCELLED'],
 };
@@ -238,8 +247,10 @@ const shipmentSchema = new Schema<IShipment>(
         'PICKED_UP',
         'IN_TRANSIT',
         'AT_DESTINATION',
+        'PARTIALLY_DELIVERED',
         'DELIVERED',
         'FAILED',
+        'RETURNED',
         'CANCELLED',
         'ROLLED_OVER',
       ],
@@ -249,7 +260,12 @@ const shipmentSchema = new Schema<IShipment>(
     idempotencyKey: { type: String, trim: true },
     externalOrderRef: { type: String, trim: true },
     trackingToken: { type: String, required: true, unique: true },
+    trackingTokenExpiresAt: { type: Date },
+    trackingTokenRevokedAt: { type: Date },
     qrToken: { type: String, required: true, unique: true },
+    pickupVerifiedAt: { type: Date },
+    pickupBalanceRequestedAt: { type: Date },
+    allowB2bWarehouseConfirm: { type: Boolean, default: true },
     statusHistory: [
       {
         status: { type: String, required: true },
@@ -266,11 +282,17 @@ shipmentSchema.index({ 'pickupAddress.location': '2dsphere' });
 shipmentSchema.index({ 'deliveryAddress.location': '2dsphere' });
 shipmentSchema.index(
   { businessId: 1, idempotencyKey: 1 },
-  { unique: true, sparse: true }
+  {
+    unique: true,
+    partialFilterExpression: { idempotencyKey: { $type: 'string' } },
+  }
 );
 shipmentSchema.index(
   { businessId: 1, externalOrderRef: 1 },
-  { unique: true, sparse: true }
+  {
+    unique: true,
+    partialFilterExpression: { externalOrderRef: { $type: 'string' } },
+  }
 );
 
 export const Shipment = model<IShipment>('Shipment', shipmentSchema);

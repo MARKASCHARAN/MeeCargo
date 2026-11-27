@@ -2,6 +2,7 @@ import { Router, type Response } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env.js';
 import { requireAuth } from '../middleware/auth.js';
+import { authRateLimiter } from '../middleware/rateLimiters.js';
 import { BusinessProfile } from '../models/BusinessProfile.js';
 import { DriverProfile } from '../models/DriverProfile.js';
 import { User } from '../models/User.js';
@@ -50,7 +51,7 @@ function clearAuthCookies(res: Response) {
   res.clearCookie('mc_refresh_token');
 }
 
-router.post('/register', async (req, res) => {
+router.post('/register', authRateLimiter, async (req, res) => {
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new HttpError(400, 'Invalid registration payload', 'VALIDATION_ERROR', parsed.error.flatten());
@@ -99,7 +100,7 @@ router.post('/register', async (req, res) => {
   });
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', authRateLimiter, async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new HttpError(400, 'Invalid login credentials format', 'VALIDATION_ERROR');

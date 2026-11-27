@@ -3,7 +3,10 @@ import { isValidObjectId } from 'mongoose';
 import { z } from 'zod';
 import { requireAuth, requireBusinessProfile, requireRole } from '../middleware/auth.js';
 import { Corridor } from '../models/Corridor.js';
+import { DeliveryProof } from '../models/DeliveryProof.js';
+import { ExceptionEvent } from '../models/ExceptionEvent.js';
 import { Payment } from '../models/Payment.js';
+import { PickupCollection } from '../models/PickupCollection.js';
 import { Shipment } from '../models/Shipment.js';
 import { Slot } from '../models/Slot.js';
 import {
@@ -15,6 +18,8 @@ import {
   importShipmentsFromCsv,
 } from '../services/csvImportService.js';
 import { submitViabilityDecision } from '../services/cutoffService.js';
+import { resolveShipmentException } from '../services/exceptionService.js';
+import { getOperationalAndShipperMetrics } from '../services/metricsService.js';
 import {
   cancelShipmentWithRefund,
   processTokenPayment,
@@ -28,6 +33,7 @@ import {
   createBookingSchema,
   createShipmentBooking,
 } from '../services/shipmentService.js';
+import { serializeCsv } from '../utils/csv.js';
 import { HttpError } from '../utils/errors.js';
 
 const router = Router();
@@ -149,25 +155,170 @@ router.post('/import/csv', requireBusinessProfile, async (req, res) => {
   });
 });
 
-router.get('/', requireBusinessProfile, async (req, res) => {
-  const filter: Record<string, unknown> = {
+const STATUS_GROUP_MAP: Record<string, string[]> = {
+  UPCOMING: ['DRAFT', 'PENDING_TOKEN', 'CONFIRMED', 'POOLED', 'LOCKED'],
+  ACTIVE: ['PICKED_UP', 'IN_TRANSIT', 'AT_DESTINATION'],
+  DELIVERED: ['DELIVERED'],
+  FAILED: ['FAILED'],
+  CANCELLED: ['CANCELLED'],
+  ROLLED_OVER: ['ROLLED_OVER'],
+};
+
+function buildShipmentQueryFilter(
+  businessId: unknown,
+  query: Record<string, unknown>
+): Record<string, unknown> {
+  const filter: Record<string, unknown> = { businessId };
+
+  if (typeof query.status === 'string' && query.status) {
+    filter.status = query.status;
+  } else if (typeof query.statusGroup === 'string' && STATUS_GROUP_MAP[query.statusGroup]) {
+    filter.status = { $in: STATUS_GROUP_MAP[query.statusGroup] };
+  }
+
+  if (typeof query.corridorId === 'string' && isValidObjectId(query.corridorId)) {
+    filter.corridorId = query.corridorId;
+  }
+
+  if (typeof query.fromDate === 'string' || typeof query.toDate === 'string') {
+    const createdAt: Record<string, Date> = {};
+    if (typeof query.fromDate === 'string' && query.fromDate) {
+      const d = new Date(query.fromDate);
+      if (!Number.isNaN(d.getTime())) createdAt.$gte = d;
+    }
+    if (typeof query.toDate === 'string' && query.toDate) {
+      const d = new Date(query.toDate);
+      if (!Number.isNaN(d.getTime())) {
+        d.setHours(23, 59, 59, 999);
+        createdAt.$lte = d;
+      }
+    }
+    if (Object.keys(createdAt).length > 0) {
+      filter.createdAt = createdAt;
+    }
+  }
+
+  return filter;
+}
+
+router.get('/analytics/impact', requireBusinessProfile, async (req, res) => {
+  const metrics = await getOperationalAndShipperMetrics({
     businessId: req.businessProfile!._id,
-  };
-  if (typeof req.query.status === 'string' && req.query.status) {
-    filter.status = req.query.status;
-  }
-  if (typeof req.query.corridorId === 'string' && isValidObjectId(req.query.corridorId)) {
-    filter.corridorId = req.query.corridorId;
-  }
+  });
+  res.json({ success: true, metrics });
+});
+
+router.get('/export/csv', requireBusinessProfile, async (req, res) => {
+  const filter = buildShipmentQueryFilter(req.businessProfile!._id, req.query);
+  const shipments = await Shipment.find(filter)
+    .populate('corridorId', 'code name')
+    .populate('slotId', 'slotCode plannedDepartureAt')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const headers = [
+    'reference',
+    'externalOrderRef',
+    'status',
+    'tokenStatus',
+    'corridorCode',
+    'slotCode',
+    'pickupStopCode',
+    'deliveryStopCode',
+    'recipientName',
+    'chargeableWeightKg',
+    'volumeCbm',
+    'projectedOrLockedInr',
+    'tokenPaidInr',
+    'remainingBalanceInr',
+    'createdAt',
+  ];
+
+  const rows = shipments.map((s) => {
+    const corridor = s.corridorId as unknown as { code?: string } | null;
+    const slot = s.slotId as unknown as { slotCode?: string } | null;
+    const price =
+      s.pricingSnapshot?.finalLockedPricePaise ??
+      s.pricingSnapshot?.projectedPricePaise ??
+      0;
+    return {
+      reference: s.reference,
+      externalOrderRef: s.externalOrderRef ?? '',
+      status: s.status,
+      tokenStatus: s.tokenStatus,
+      corridorCode: corridor?.code ?? '',
+      slotCode: slot?.slotCode ?? '',
+      pickupStopCode: s.pickupStopCode,
+      deliveryStopCode: s.deliveryStopCode,
+      recipientName: s.recipientName,
+      chargeableWeightKg: s.cargo.chargeableWeightKg,
+      volumeCbm: s.cargo.volumeCbm,
+      projectedOrLockedInr: (price / 100).toFixed(2),
+      tokenPaidInr: ((s.pricingSnapshot?.tokenPaidPaise ?? 0) / 100).toFixed(2),
+      remainingBalanceInr: ((s.pricingSnapshot?.remainingBalancePaise ?? 0) / 100).toFixed(2),
+      createdAt: new Date(s.createdAt).toISOString(),
+    };
+  });
+
+  const csv = serializeCsv(headers, rows);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="meecargo-shipments-export.csv"');
+  res.send(csv);
+});
+
+router.get('/', requireBusinessProfile, async (req, res) => {
+  const filter = buildShipmentQueryFilter(req.businessProfile!._id, req.query);
 
   const shipments = await Shipment.find(filter)
     .populate('corridorId', 'code name')
     .populate('slotId', 'slotCode label plannedDepartureAt cutoffAt')
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const ids = shipments.map((s) => s._id);
+  const [proofs, collections] = await Promise.all([
+    DeliveryProof.find({ shipmentId: { $in: ids } }).lean(),
+    PickupCollection.find({ shipmentId: { $in: ids } }).lean(),
+  ]);
+
+  const proofByShipment = new Map(proofs.map((p) => [String(p.shipmentId), p]));
+  const collectionByShipment = new Map(
+    collections.map((c) => [String(c.shipmentId), c])
+  );
+
+  const enriched = shipments.map((s) => {
+    const proof = proofByShipment.get(String(s._id));
+    const collection = collectionByShipment.get(String(s._id));
+    return {
+      ...s,
+      podSummary: proof?.verifiedAt
+        ? {
+            confirmationMode: proof.confirmationMode,
+            verifiedAt: proof.verifiedAt,
+            b2bSignOffName: proof.b2bSignOffName,
+            photoUrl: proof.photoAccessToken
+              ? `/api/v1/track/pod-photo/${proof.photoAccessToken}?trackingToken=${encodeURIComponent(
+                  s.trackingToken
+                )}`
+              : null,
+          }
+        : null,
+      pickupCollectionSummary: collection
+        ? {
+            collectionState: collection.collectionState,
+            settlementState: collection.settlementState,
+            collectedAmountPaise: collection.collectedAmountPaise,
+            paymentMethod: collection.paymentMethod,
+            providerRef: collection.providerRef,
+            isSimulated: collection.isSimulated,
+          }
+        : null,
+    };
+  });
 
   res.json({
     success: true,
-    shipments,
+    shipments: enriched,
   });
 });
 
@@ -317,6 +468,83 @@ router.get('/:shipmentId/payments', requireBusinessProfile, async (req, res) => 
   res.json({
     success: true,
     payments,
+  });
+});
+
+router.post('/:shipmentId/revoke-tracking', requireBusinessProfile, async (req, res) => {
+  const shipmentId = Array.isArray(req.params.shipmentId)
+    ? req.params.shipmentId[0]
+    : req.params.shipmentId;
+  if (!isValidObjectId(shipmentId)) {
+    throw new HttpError(400, 'Invalid shipment ID', 'VALIDATION_ERROR');
+  }
+
+  const shipment = await Shipment.findOneAndUpdate(
+    { _id: shipmentId, businessId: req.businessProfile!._id },
+    { $set: { trackingTokenRevokedAt: new Date() } },
+    { returnDocument: 'after' }
+  );
+  if (!shipment) {
+    throw new HttpError(403, 'Shipment not found for your business', 'FORBIDDEN');
+  }
+
+  res.json({
+    success: true,
+    shipment,
+  });
+});
+
+router.get('/:shipmentId/exceptions', requireBusinessProfile, async (req, res) => {
+  const shipmentId = Array.isArray(req.params.shipmentId)
+    ? req.params.shipmentId[0]
+    : req.params.shipmentId;
+  if (!isValidObjectId(shipmentId)) {
+    throw new HttpError(400, 'Invalid shipment ID', 'VALIDATION_ERROR');
+  }
+
+  const shipment = await Shipment.findOne({
+    _id: shipmentId,
+    businessId: req.businessProfile!._id,
+  });
+  if (!shipment) {
+    throw new HttpError(403, 'Shipment not found for your business', 'FORBIDDEN');
+  }
+
+  const exceptions = await ExceptionEvent.find({ shipmentId: shipment._id }).sort({
+    createdAt: -1,
+  });
+  res.json({
+    success: true,
+    exceptions,
+  });
+});
+
+router.post('/exceptions/:exceptionId/resolve', requireBusinessProfile, async (req, res) => {
+  const exceptionId = Array.isArray(req.params.exceptionId)
+    ? req.params.exceptionId[0]
+    : req.params.exceptionId;
+  const schema = z.object({
+    action: z.enum(['RESCHEDULE', 'RETURN', 'REALLOCATE']),
+    targetSlotId: z.string().trim().optional(),
+    note: z.string().trim().max(300).optional(),
+  });
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    throw new HttpError(400, 'Invalid exception resolution payload', 'VALIDATION_ERROR');
+  }
+
+  const result = await resolveShipmentException({
+    exceptionId,
+    businessId: req.businessProfile!._id,
+    userId: req.auth!.userId,
+    action: parsed.data.action,
+    targetSlotId: parsed.data.targetSlotId || undefined,
+    note: parsed.data.note,
+  });
+
+  res.json({
+    success: true,
+    ...result,
   });
 });
 

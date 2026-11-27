@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { io } from 'socket.io-client';
 import {
   AlertTriangle,
   Award,
+  CheckCircle2,
   CreditCard,
+  Download,
   ExternalLink,
   PackagePlus,
   RotateCcw,
@@ -12,25 +15,47 @@ import {
 } from 'lucide-react';
 import {
   cancelShipment,
+  exportShipmentsCsv,
   fetchCorridors,
+  fetchShipmentExceptions,
   fetchShipments,
   payShipmentToken,
+  resolveShipmentException,
   submitViabilityDecision,
 } from '../../api/client';
+import { ShipmentQrCode } from '../../components/shipments/ShipmentQrCode';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateViews';
 import { formatPaise } from '../../lib/format';
+import type { ExceptionRecord } from '../../types/api';
 
 export function ShipmentsHistoryPage() {
   const queryClient = useQueryClient();
   const [rolloverTargets, setRolloverTargets] = useState<Record<string, string>>({});
+  const [shipmentExceptions, setShipmentExceptions] = useState<Record<string, ExceptionRecord[]>>(
+    {}
+  );
+  const [expandedExceptionShipmentId, setExpandedExceptionShipmentId] = useState<string | null>(
+    null
+  );
+  const [rescheduleSlots, setRescheduleSlots] = useState<Record<string, string>>({});
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [statusGroup, setStatusGroup] = useState<string>('');
+  const [corridorFilter, setCorridorFilter] = useState<string>('');
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
 
   const shipmentsQuery = useQuery({
-    queryKey: ['shipments'],
-    queryFn: fetchShipments,
+    queryKey: ['shipments', statusGroup, corridorFilter, fromDate, toDate],
+    queryFn: () =>
+      fetchShipments({
+        statusGroup: statusGroup || undefined,
+        corridorId: corridorFilter || undefined,
+        fromDate: fromDate || undefined,
+        toDate: toDate || undefined,
+      }),
   });
 
   const corridorsQuery = useQuery({
@@ -43,6 +68,20 @@ export function ShipmentsHistoryPage() {
     void queryClient.invalidateQueries({ queryKey: ['pools'] });
     void queryClient.invalidateQueries({ queryKey: ['corridors'] });
   };
+
+  useEffect(() => {
+    const apiOrigin = import.meta.env.VITE_API_URL || window.location.origin;
+    const socket = io(apiOrigin, {
+      withCredentials: true,
+      transports: ['websocket', 'polling'],
+    });
+    socket.on('shipments:changed', () => {
+      void queryClient.invalidateQueries({ queryKey: ['shipments'] });
+    });
+    return () => {
+      socket.disconnect();
+    };
+  }, [queryClient]);
 
   const payMutation = useMutation({
     mutationFn: (shipmentId: string) =>
@@ -117,7 +156,30 @@ export function ShipmentsHistoryPage() {
             Scoped exclusively to your B2B business ownership. Payments shown in prototype are simulated.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void exportShipmentsCsv({
+                statusGroup: statusGroup || undefined,
+                corridorId: corridorFilter || undefined,
+                fromDate: fromDate || undefined,
+                toDate: toDate || undefined,
+              }).then((csv) => {
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'meecargo-shipments-export.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+              });
+            }}
+          >
+            <Download className="h-4 w-4" />
+            Export CSV
+          </Button>
           <Link to="/shipper/import">
             <Button variant="outline" size="sm">
               Import CSV
@@ -131,6 +193,69 @@ export function ShipmentsHistoryPage() {
           </Link>
         </div>
       </div>
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="grid gap-3 p-4 sm:grid-cols-4">
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">
+              Status Group
+            </label>
+            <select
+              value={statusGroup}
+              onChange={(e) => setStatusGroup(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
+            >
+              <option value="">All Shipments</option>
+              <option value="UPCOMING">Upcoming (Pending / Confirmed / Pooled / Locked)</option>
+              <option value="ACTIVE">Active (Picked Up / In Transit / At Destination)</option>
+              <option value="DELIVERED">Delivered</option>
+              <option value="FAILED">Failed</option>
+              <option value="CANCELLED">Cancelled</option>
+              <option value="ROLLED_OVER">Rolled Over</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">
+              Corridor
+            </label>
+            <select
+              value={corridorFilter}
+              onChange={(e) => setCorridorFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
+            >
+              <option value="">All Corridors</option>
+              {corridors.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {c.code} — {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">
+              From Date
+            </label>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">
+              To Date
+            </label>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+            />
+          </div>
+        </CardContent>
+      </Card>
 
       {actionMsg ? (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
@@ -271,6 +396,10 @@ export function ShipmentsHistoryPage() {
                     </div>
                   </div>
 
+                  {s.qrToken && !['CANCELLED', 'DRAFT'].includes(s.status) ? (
+                    <ShipmentQrCode qrToken={s.qrToken} reference={s.reference} />
+                  ) : null}
+
                   {pricing ? (
                     <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-5">
                       <div>
@@ -309,6 +438,48 @@ export function ShipmentsHistoryPage() {
                           {formatPaise(pricing.remainingBalancePaise)}
                         </p>
                       </div>
+                    </div>
+                  ) : null}
+
+                  {s.pickupCollectionSummary ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950">
+                      <span>
+                        Pickup Balance Collected:{' '}
+                        <strong>
+                          {formatPaise(s.pickupCollectionSummary.collectedAmountPaise)}
+                        </strong>{' '}
+                        ({s.pickupCollectionSummary.paymentMethod} •{' '}
+                        {s.pickupCollectionSummary.providerRef})
+                      </span>
+                      <Badge variant="info">
+                        Collection: {s.pickupCollectionSummary.collectionState} / Settlement:{' '}
+                        {s.pickupCollectionSummary.settlementState}
+                      </Badge>
+                    </div>
+                  ) : null}
+
+                  {s.podSummary ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4" />
+                        <span>
+                          POD Verified ({s.podSummary.confirmationMode}) at{' '}
+                          {new Date(s.podSummary.verifiedAt).toLocaleString()}
+                          {s.podSummary.b2bSignOffName
+                            ? ` • Signed by ${s.podSummary.b2bSignOffName}`
+                            : ''}
+                        </span>
+                      </div>
+                      {s.podSummary.photoUrl ? (
+                        <a
+                          href={s.podSummary.photoUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold underline"
+                        >
+                          View POD Photo
+                        </a>
+                      ) : null}
                     </div>
                   ) : null}
 
@@ -382,6 +553,146 @@ export function ShipmentsHistoryPage() {
                           Request Full Token Refund
                         </Button>
                       </div>
+                    </div>
+                  ) : null}
+
+                  {['FAILED', 'PARTIALLY_DELIVERED', 'RETURNED', 'LOCKED', 'PICKED_UP', 'IN_TRANSIT', 'AT_DESTINATION'].includes(
+                    s.status
+                  ) ? (
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold text-slate-800">
+                          Delivery Exceptions &amp; Recovery Actions
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const nextId =
+                              expandedExceptionShipmentId === s._id ? null : s._id;
+                            setExpandedExceptionShipmentId(nextId);
+                            if (nextId) {
+                              void fetchShipmentExceptions(s._id)
+                                .then((res) =>
+                                  setShipmentExceptions((prev) => ({
+                                    ...prev,
+                                    [s._id]: res.exceptions,
+                                  }))
+                                )
+                                .catch(() => undefined);
+                            }
+                          }}
+                        >
+                          {expandedExceptionShipmentId === s._id
+                            ? 'Hide Exceptions'
+                            : 'Check Exceptions'}
+                        </Button>
+                      </div>
+
+                      {expandedExceptionShipmentId === s._id ? (
+                        <div className="space-y-2 pt-1">
+                          {(shipmentExceptions[s._id] ?? []).length === 0 ? (
+                            <p className="text-slate-500">
+                              No delivery or route exceptions recorded for this shipment.
+                            </p>
+                          ) : (
+                            (shipmentExceptions[s._id] ?? []).map((ex) => (
+                              <div
+                                key={ex._id}
+                                className="space-y-2 rounded border border-rose-200 bg-white p-2.5"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-semibold text-rose-950">
+                                    {ex.exceptionType}: {ex.reason}
+                                  </span>
+                                  <Badge
+                                    variant={
+                                      ex.resolutionStatus === 'OPEN' ? 'warning' : 'success'
+                                    }
+                                  >
+                                    {ex.resolutionStatus}
+                                  </Badge>
+                                </div>
+                                {ex.resolutionStatus === 'OPEN' ? (
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {futureSlots.length > 0 ? (
+                                      <>
+                                        <select
+                                          value={
+                                            rescheduleSlots[ex._id] ?? futureSlots[0]?._id ?? ''
+                                          }
+                                          onChange={(e) =>
+                                            setRescheduleSlots((prev) => ({
+                                              ...prev,
+                                              [ex._id]: e.target.value,
+                                            }))
+                                          }
+                                          className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                                        >
+                                          {futureSlots.map((sl) => (
+                                            <option key={sl._id} value={sl._id}>
+                                              {sl.label} ({sl.slotCode})
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <Button
+                                          size="sm"
+                                          variant="primary"
+                                          onClick={() => {
+                                            const slotId =
+                                              rescheduleSlots[ex._id] ?? futureSlots[0]?._id;
+                                            void resolveShipmentException(ex._id, {
+                                              action: 'RESCHEDULE',
+                                              targetSlotId: slotId,
+                                              note: 'Rescheduled from shipper console',
+                                            }).then(() => {
+                                              setActionMsg(
+                                                `Shipment ${s.reference} rescheduled to selected future slot.`
+                                              );
+                                              invalidateAll();
+                                              return fetchShipmentExceptions(s._id).then((r) =>
+                                                setShipmentExceptions((prev) => ({
+                                                  ...prev,
+                                                  [s._id]: r.exceptions,
+                                                }))
+                                              );
+                                            });
+                                          }}
+                                        >
+                                          Reschedule Slot
+                                        </Button>
+                                      </>
+                                    ) : null}
+                                    <Button
+                                      size="sm"
+                                      variant="danger"
+                                      onClick={() => {
+                                        void resolveShipmentException(ex._id, {
+                                          action: 'RETURN',
+                                          note: 'Returned to shipper',
+                                        }).then(() => {
+                                          setActionMsg(
+                                            `Shipment ${s.reference} marked RETURNED.`
+                                          );
+                                          invalidateAll();
+                                          return fetchShipmentExceptions(s._id).then((r) =>
+                                            setShipmentExceptions((prev) => ({
+                                              ...prev,
+                                              [s._id]: r.exceptions,
+                                            }))
+                                          );
+                                        });
+                                      }}
+                                    >
+                                      Mark Returned
+                                    </Button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </CardContent>

@@ -11,13 +11,16 @@ import type {
   DriverAvailability,
   DriverNotification,
   DriverProfile,
+  ExceptionRecord,
   GeocodeResult,
   HealthResponse,
   MeResponse,
+  OperationalImpactMetrics,
   PaymentChoice,
   PaymentRecord,
   PoolSummary,
   PriceCalculationBreakdown,
+  PublicTrackingResponse,
   Shipment,
   StructuredAddress,
   TripSummary,
@@ -230,11 +233,55 @@ export function calculateChargeableWeight(payload: {
   });
 }
 
-export function fetchShipments(): Promise<{
+export function fetchShipments(filters?: {
+  statusGroup?: string;
+  corridorId?: string;
+  fromDate?: string;
+  toDate?: string;
+}): Promise<{
   success: boolean;
   shipments: Shipment[];
 }> {
-  return apiFetch('/api/v1/shipments');
+  const params = new URLSearchParams();
+  if (filters?.statusGroup) params.set('statusGroup', filters.statusGroup);
+  if (filters?.corridorId) params.set('corridorId', filters.corridorId);
+  if (filters?.fromDate) params.set('fromDate', filters.fromDate);
+  if (filters?.toDate) params.set('toDate', filters.toDate);
+  const qs = params.toString();
+  return apiFetch(`/api/v1/shipments${qs ? `?${qs}` : ''}`);
+}
+
+export async function exportShipmentsCsv(filters?: {
+  statusGroup?: string;
+  corridorId?: string;
+  fromDate?: string;
+  toDate?: string;
+}): Promise<string> {
+  const token = useAuthStore.getState().accessToken;
+  const params = new URLSearchParams();
+  if (filters?.statusGroup) params.set('statusGroup', filters.statusGroup);
+  if (filters?.corridorId) params.set('corridorId', filters.corridorId);
+  if (filters?.fromDate) params.set('fromDate', filters.fromDate);
+  if (filters?.toDate) params.set('toDate', filters.toDate);
+  const qs = params.toString();
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/shipments/export/csv${qs ? `?${qs}` : ''}`,
+    {
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }
+  );
+  if (!response.ok) {
+    throw new ApiError(response.status, 'Failed to export CSV');
+  }
+  return response.text();
+}
+
+export function fetchOperationalImpactMetrics(): Promise<{
+  success: boolean;
+  metrics: OperationalImpactMetrics;
+}> {
+  return apiFetch('/api/v1/shipments/analytics/impact');
 }
 
 export function createShipment(payload: {
@@ -443,5 +490,244 @@ export function fetchDriverNotifications(): Promise<{
 export function markDriverNotificationRead(id: string): Promise<{ success: boolean }> {
   return apiFetch(`/api/v1/driver/notifications/${id}/read`, {
     method: 'PATCH',
+  });
+}
+
+export function optimizeDriverTripRoute(tripId: string): Promise<{
+  success: boolean;
+  optimized: boolean;
+  routePlan: TripSummary['routePlan'];
+  loadingPlan: TripSummary['loadingPlan'];
+  backhaulDecision: TripSummary['backhaulDecision'];
+}> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/optimize-route`, {
+    method: 'POST',
+  });
+}
+
+export function submitLoadingOverride(
+  tripId: string,
+  payload: { shipmentId: string; note: string }
+): Promise<{
+  success: boolean;
+  loadingPlan: TripSummary['loadingPlan'];
+}> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/loading-override`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function transitionDriverTrip(
+  tripId: string,
+  action: 'start' | 'pause' | 'resume' | 'complete',
+  payload?: { reason?: string; idempotencyKey?: string; locationDisclosureAccepted?: boolean }
+): Promise<{ success: boolean; trip: TripSummary }> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/${action}`, {
+    method: 'POST',
+    body: JSON.stringify(payload ?? {}),
+  });
+}
+
+export function scanDriverQrPickup(
+  tripId: string,
+  payload: { qrToken: string; idempotencyKey?: string }
+): Promise<{
+  success: boolean;
+  deduplicated: boolean;
+  shipment: Shipment;
+  pickupBalanceDuePaise: number;
+  balanceCollectionTriggered: boolean;
+}> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/scan-qr`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateDriverShipmentStatus(
+  tripId: string,
+  shipmentId: string,
+  payload: {
+    status: 'IN_TRANSIT' | 'AT_DESTINATION' | 'FAILED';
+    reason?: string;
+    idempotencyKey?: string;
+  }
+): Promise<{ success: boolean; shipment: Shipment }> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/shipments/${shipmentId}/status`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function generateDeliveryOtp(
+  tripId: string,
+  shipmentId: string
+): Promise<{
+  success: boolean;
+  reference: string;
+  expiresAt: string;
+  demoOtp?: string;
+}> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/shipments/${shipmentId}/otp`, {
+    method: 'POST',
+  });
+}
+
+export async function verifyDeliveryProof(
+  tripId: string,
+  shipmentId: string,
+  formData: FormData
+): Promise<{ success: boolean; shipment: Shipment }> {
+  const token = useAuthStore.getState().accessToken;
+  const baseUrl = import.meta.env.VITE_API_URL ?? '';
+  const response = await fetch(
+    `${baseUrl}/api/v1/driver/trips/${tripId}/shipments/${shipmentId}/deliver`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    }
+  );
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      data?.error ?? `Delivery confirmation failed (${response.status})`,
+      data?.code
+    );
+  }
+  return data;
+}
+
+export function syncOfflineDriverEventsBatch(
+  tripId: string,
+  events: Array<{
+    idempotencyKey: string;
+    kind: 'TRIP_STATUS' | 'SHIPMENT_STATUS';
+    targetStatus: string;
+    shipmentId?: string;
+    reason?: string;
+    occurredAt: string;
+  }>
+): Promise<{
+  success: boolean;
+  results: Array<{
+    idempotencyKey: string;
+    status: 'SYNCED' | 'DUPLICATE' | 'CONFLICT';
+    message: string;
+  }>;
+}> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/sync-offline`, {
+    method: 'POST',
+    body: JSON.stringify({ events }),
+  });
+}
+
+export function fetchPublicTracking(
+  trackingToken: string
+): Promise<PublicTrackingResponse> {
+  return apiFetch<PublicTrackingResponse>(
+    `/api/v1/track/${encodeURIComponent(trackingToken)}`
+  );
+}
+
+export function collectDriverPickupBalance(
+  tripId: string,
+  shipmentId: string,
+  payload: {
+    paymentMethod: 'SIMULATED_UPI' | 'CASH_AT_PICKUP' | 'TEST_GATEWAY';
+    idempotencyKey?: string;
+  }
+): Promise<{
+  success: boolean;
+  deduplicated: boolean;
+  collection: {
+    providerRef: string;
+    collectedAmountPaise: number;
+    collectionState: string;
+    settlementState: string;
+    isSimulated: boolean;
+  };
+}> {
+  return apiFetch(
+    `/api/v1/driver/trips/${tripId}/shipments/${shipmentId}/collect-balance`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export function fetchDriverTripExceptions(
+  tripId: string
+): Promise<{ success: boolean; exceptions: ExceptionRecord[] }> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/exceptions`);
+}
+
+export async function reportDriverTripException(
+  tripId: string,
+  formData: FormData
+): Promise<{
+  success: boolean;
+  exception: ExceptionRecord;
+  reassignment: {
+    reassigned: boolean;
+    rescueTrip?: { tripCode: string };
+    routeRecalculated?: boolean;
+    reason: string;
+  } | null;
+}> {
+  const token = useAuthStore.getState().accessToken;
+  const baseUrl = import.meta.env.VITE_API_URL ?? '';
+  const response = await fetch(`${baseUrl}/api/v1/driver/trips/${tripId}/exceptions`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      data?.error ?? `Exception submission failed (${response.status})`,
+      data?.code
+    );
+  }
+  return data;
+}
+
+export function sendActiveTripLocation(
+  tripId: string,
+  coordinates: [number, number]
+): Promise<{ success: boolean; recordedAt: string; coordinates: [number, number] }> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/location`, {
+    method: 'POST',
+    body: JSON.stringify({ coordinates }),
+  });
+}
+
+export function fetchShipmentExceptions(
+  shipmentId: string
+): Promise<{ success: boolean; exceptions: ExceptionRecord[] }> {
+  return apiFetch(`/api/v1/shipments/${shipmentId}/exceptions`);
+}
+
+export function resolveShipmentException(
+  exceptionId: string,
+  payload: {
+    action: 'RESCHEDULE' | 'RETURN' | 'REALLOCATE';
+    targetSlotId?: string;
+    note?: string;
+  }
+): Promise<{
+  success: boolean;
+  exception: ExceptionRecord;
+  shipment: Shipment;
+}> {
+  return apiFetch(`/api/v1/shipments/exceptions/${exceptionId}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });
 }

@@ -7,10 +7,12 @@ import { getDatabaseStatus } from './config/database.js';
 import authRoutes from './routes/auth.routes.js';
 import corridorRoutes from './routes/corridor.routes.js';
 import poolRoutes from './routes/pool.routes.js';
+import publicTrackRoutes from './routes/publicTrack.routes.js';
 import shipperBusinessRoutes from './routes/shipperBusiness.routes.js';
 import shipmentRoutes from './routes/shipment.routes.js';
 import driverRoutes from './routes/driver.routes.js';
 import { HttpError } from './utils/errors.js';
+import { logger } from './utils/logger.js';
 
 export function createApp() {
   const app = express();
@@ -51,6 +53,7 @@ export function createApp() {
   app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/corridors', corridorRoutes);
   app.use('/api/v1/pools', poolRoutes);
+  app.use('/api/v1/track', publicTrackRoutes);
   app.use('/api/v1/shipper/business', shipperBusinessRoutes);
   app.use('/api/v1/shipments', shipmentRoutes);
   app.use('/api/v1/driver', driverRoutes);
@@ -82,7 +85,22 @@ export function createApp() {
       return;
     }
 
-    console.error('[API Error]', err.message);
+    if (err.name === 'MulterError') {
+      res.status(400).json({
+        success: false,
+        error:
+          err.message === 'File too large'
+            ? 'Uploaded file exceeds the 5 MB limit'
+            : err.message,
+        code: 'INVALID_FILE_UPLOAD',
+      });
+      return;
+    }
+
+    logger.error('[API Error]', {
+      message: err.message,
+      name: err.name,
+    });
     res.status(500).json({
       success: false,
       error: env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
