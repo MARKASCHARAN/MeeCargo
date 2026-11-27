@@ -1,6 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-export type UserRole = 'SHIPPER' | 'DRIVER';
+export type UserRole = 'SHIPPER' | 'DRIVER' | 'PLATFORM_OWNER';
 
 export interface IUser extends Document {
   _id: Types.ObjectId;
@@ -34,7 +34,7 @@ const userSchema = new Schema<IUser>(
     passwordHash: { type: String, required: true, select: false },
     role: {
       type: String,
-      enum: ['SHIPPER', 'DRIVER'],
+      enum: ['SHIPPER', 'DRIVER', 'PLATFORM_OWNER'],
       required: true,
     },
     businessId: {
@@ -48,5 +48,12 @@ const userSchema = new Schema<IUser>(
 
 userSchema.index({ role: 1, isActive: 1 });
 userSchema.index({ businessId: 1 });
+userSchema.index(
+  { role: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { role: 'PLATFORM_OWNER' },
+  }
+);
 
 export const User = model<IUser>('User', userSchema);

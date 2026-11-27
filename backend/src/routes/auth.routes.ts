@@ -52,6 +52,13 @@ function clearAuthCookies(res: Response) {
 }
 
 router.post('/register', authRateLimiter, async (req, res) => {
+  if (req.body?.role === 'PLATFORM_OWNER') {
+    throw new HttpError(
+      403,
+      'Platform Owner is a singleton platform account provisioned by setup/seed and cannot be publicly registered.',
+      'PLATFORM_OWNER_REGISTRATION_FORBIDDEN'
+    );
+  }
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new HttpError(400, 'Invalid registration payload', 'VALIDATION_ERROR', parsed.error.flatten());

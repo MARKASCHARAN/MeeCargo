@@ -19,6 +19,18 @@ const envSchema = z.object({
   OPTIMIZER_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(5000),
   GEOCODING_PROVIDER: z.enum(['FIXTURE', 'NOMINATIM']).default('FIXTURE'),
   NOTIFICATION_PROVIDER: z.enum(['CONSOLE', 'WEBHOOK']).default('CONSOLE'),
+  PLATFORM_OWNER_EMAIL: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().trim().email().optional()
+  ),
+  PLATFORM_OWNER_PASSWORD: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().min(8).optional()
+  ),
+  PLATFORM_OWNER_NAME: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().trim().min(2).max(120).optional()
+  ),
   CO2_EMISSIONS_FACTOR_KG_PER_TON_KM: z.preprocess(
     (v) => (v === '' ? undefined : v),
     z.coerce.number().nonnegative().optional()

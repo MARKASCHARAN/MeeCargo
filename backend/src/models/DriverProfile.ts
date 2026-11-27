@@ -2,6 +2,7 @@ import { Schema, model, type Document, type Types } from 'mongoose';
 import type { FleetTier } from './Vehicle.js';
 
 export type DriverAvailability = 'AVAILABLE' | 'ON_TRIP' | 'OFFLINE';
+export type DriverAccountStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
 
 export interface IDriverProfile extends Document {
   _id: Types.ObjectId;
@@ -9,7 +10,9 @@ export interface IDriverProfile extends Document {
   name: string;
   phone: string;
   availabilityStatus: DriverAvailability;
+  accountStatus: DriverAccountStatus;
   fleetTier: FleetTier;
+  platformOwnerId?: Types.ObjectId;
   vehicleId?: Types.ObjectId;
   licenseNumber?: string;
   homeBase?: string;
@@ -27,11 +30,22 @@ const driverProfileSchema = new Schema<IDriverProfile>(
       enum: ['AVAILABLE', 'ON_TRIP', 'OFFLINE'],
       default: 'AVAILABLE',
     },
+    accountStatus: {
+      type: String,
+      enum: ['ACTIVE', 'INACTIVE', 'SUSPENDED'],
+      default: 'ACTIVE',
+      required: true,
+    },
     fleetTier: {
       type: String,
       enum: ['TIER_1', 'TIER_2', 'TIER_3'],
-      default: 'TIER_1',
+      default: 'TIER_2',
       required: true,
+    },
+    platformOwnerId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
     },
     vehicleId: { type: Schema.Types.ObjectId, ref: 'Vehicle' },
     licenseNumber: { type: String, trim: true, uppercase: true, maxlength: 40 },
@@ -40,6 +54,16 @@ const driverProfileSchema = new Schema<IDriverProfile>(
   { timestamps: true }
 );
 
-driverProfileSchema.index({ availabilityStatus: 1, fleetTier: 1 });
+driverProfileSchema.pre('validate', function () {
+  if (this.fleetTier === 'TIER_1' && !this.platformOwnerId) {
+    this.invalidate(
+      'platformOwnerId',
+      'Tier 1 contract drivers must have a valid platformOwnerId.'
+    );
+  }
+});
+
+driverProfileSchema.index({ availabilityStatus: 1, fleetTier: 1, accountStatus: 1 });
+driverProfileSchema.index({ platformOwnerId: 1, fleetTier: 1 });
 
 export const DriverProfile = model<IDriverProfile>('DriverProfile', driverProfileSchema);

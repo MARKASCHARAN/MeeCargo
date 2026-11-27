@@ -46,7 +46,12 @@ export function signAccessToken(user: {
 
 export function verifyAccessToken(token: string): AccessTokenPayload {
   const decoded = jwt.verify(token, env.JWT_SECRET) as AccessTokenPayload;
-  if (!decoded?.sub || (decoded.role !== 'SHIPPER' && decoded.role !== 'DRIVER')) {
+  if (
+    !decoded?.sub ||
+    (decoded.role !== 'SHIPPER' &&
+      decoded.role !== 'DRIVER' &&
+      decoded.role !== 'PLATFORM_OWNER')
+  ) {
     throw new HttpError(401, 'Invalid access token', 'INVALID_TOKEN');
   }
   return decoded;

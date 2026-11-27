@@ -94,6 +94,7 @@ async function reassignRemainingShipmentsOnBreakdown(params: {
 
   const drivers = await DriverProfile.find({
     availabilityStatus: 'AVAILABLE',
+    accountStatus: { $nin: ['INACTIVE', 'SUSPENDED'] },
     userId: { $ne: brokenTrip.driverId },
   });
 

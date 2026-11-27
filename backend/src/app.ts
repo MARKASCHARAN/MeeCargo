@@ -11,6 +11,7 @@ import publicTrackRoutes from './routes/publicTrack.routes.js';
 import shipperBusinessRoutes from './routes/shipperBusiness.routes.js';
 import shipmentRoutes from './routes/shipment.routes.js';
 import driverRoutes from './routes/driver.routes.js';
+import platformOwnerRoutes from './routes/platformOwner.routes.js';
 import { HttpError } from './utils/errors.js';
 import { logger } from './utils/logger.js';
 
@@ -57,6 +58,7 @@ export function createApp() {
   app.use('/api/v1/shipper/business', shipperBusinessRoutes);
   app.use('/api/v1/shipments', shipmentRoutes);
   app.use('/api/v1/driver', driverRoutes);
+  app.use('/api/v1/platform-owner', platformOwnerRoutes);
 
   app.use((req: Request, res: Response) => {
     res.status(404).json({
