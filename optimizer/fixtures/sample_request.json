@@ -1,0 +1,61 @@
+{
+  "vehicles": [
+    {
+      "id": "GJ-06-MC-1001",
+      "max_weight_kg": 2500,
+      "max_volume_cbm": 12.5
+    }
+  ],
+  "stops": [
+    {
+      "stop_index": 0,
+      "stop_code": "VAD",
+      "name": "Vadodara (Makarpura Origin Hub)",
+      "demand_weight_kg": 0,
+      "demand_volume_cbm": 0,
+      "time_window_min": [0, 60],
+      "shipment_ids": []
+    },
+    {
+      "stop_index": 1,
+      "stop_code": "ANA",
+      "name": "Anand (GIDC Drop Zone)",
+      "demand_weight_kg": 240,
+      "demand_volume_cbm": 1.1,
+      "time_window_min": [30, 180],
+      "shipment_ids": ["SHIP-1"]
+    },
+    {
+      "stop_index": 2,
+      "stop_code": "NAD",
+      "name": "Nadiad (Station Road Drop Zone)",
+      "demand_weight_kg": 180,
+      "demand_volume_cbm": 0.9,
+      "time_window_min": [60, 240],
+      "shipment_ids": ["SHIP-2"]
+    },
+    {
+      "stop_index": 3,
+      "stop_code": "AMD",
+      "name": "Ahmedabad (Narol Destination)",
+      "demand_weight_kg": 420,
+      "demand_volume_cbm": 2.2,
+      "time_window_min": [90, 320],
+      "shipment_ids": ["SHIP-3"]
+    }
+  ],
+  "distance_matrix_meters": [
+    [0, 42800, 61400, 114600],
+    [42800, 0, 20500, 74200],
+    [61400, 20500, 0, 55800],
+    [114600, 74200, 55800, 0]
+  ],
+  "duration_matrix_seconds": [
+    [0, 3120, 4380, 7380],
+    [3120, 0, 1620, 4920],
+    [4380, 1620, 0, 3780],
+    [7380, 4920, 3780, 0]
+  ],
+  "open_ended_outbound": true,
+  "time_limit_seconds": 5
+}

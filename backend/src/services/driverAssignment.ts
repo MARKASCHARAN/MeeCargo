@@ -11,8 +11,10 @@ import { Trip, type ITrip } from '../models/Trip.js';
 import { emitDriverAssignment, emitPoolUpdated } from '../socket/poolGateway.js';
 import { HttpError } from '../utils/errors.js';
 import { allocateVehicleForPool } from './fleetAllocator.js';
+import { evaluateBackhaulForTrip } from './backhaulService.js';
 import { buildPoolLiveEvent } from './poolService.js';
 import { getActivePricingRules } from './pricingEngine.js';
+import { optimizeAndPlanTripRoute } from './routePlanningService.js';
 
 export async function hasOverlappingDriverTrip(params: {
   driverId: Types.ObjectId | string;
@@ -152,7 +154,7 @@ export async function allocateAndAssignTripForPool(params: {
     throw new HttpError(400, 'Invalid poolId', 'VALIDATION_ERROR');
   }
 
-  return withTransaction(async (session) => {
+  const outcome = await withTransaction(async (session) => {
     const existingTrip = await Trip.findOne({ poolId }).session(session);
     if (existingTrip) {
       return {
@@ -176,11 +178,11 @@ export async function allocateAndAssignTripForPool(params: {
       );
     }
 
-    const [corridor, slot, shipments] = await Promise.all([
-      Corridor.findById(pool.corridorId).session(session),
-      Slot.findById(pool.slotId).session(session),
-      Shipment.find({ _id: { $in: pool.shipmentIds } }).session(session),
-    ]);
+    const corridor = await Corridor.findById(pool.corridorId).session(session);
+    const slot = await Slot.findById(pool.slotId).session(session);
+    const shipments = await Shipment.find({ _id: { $in: pool.shipmentIds } }).session(
+      session
+    );
 
     if (!corridor || !slot) {
       throw new HttpError(404, 'Corridor or slot missing', 'NOT_FOUND');
@@ -302,6 +304,23 @@ export async function allocateAndAssignTripForPool(params: {
       reason: allocation.reason,
     };
   });
+
+  if (outcome.trip && outcome.driverAssigned) {
+    try {
+      await optimizeAndPlanTripRoute({
+        tripId: String(outcome.trip._id),
+        actorUserId,
+      });
+      await evaluateBackhaulForTrip({
+        tripId: String(outcome.trip._id),
+        applyMatch: true,
+      });
+    } catch {
+      // Best-effort post-assignment optimization; failures leave routePlan status honest
+    }
+  }
+
+  return outcome;
 }
 
 export async function respondToTripAssignment(params: {

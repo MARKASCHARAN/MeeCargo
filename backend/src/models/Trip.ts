@@ -36,6 +36,79 @@ export interface TripAllocationEconomics {
   reason: string;
 }
 
+export interface TripRoutePlan {
+  optimizationStatus: 'PENDING' | 'OPTIMAL' | 'INFEASIBLE' | 'OPTIMIZER_UNAVAILABLE';
+  provider: 'OR_TOOLS' | 'NONE';
+  matrixProvider: 'FIXTURE' | 'OSRM';
+  totalDistanceMeters: number;
+  estimatedDurationSeconds: number;
+  orderedStops: Array<{
+    sequence: number;
+    stopCode: string;
+    name: string;
+    arrivalMin: number;
+    cumulativeDistanceMeters: number;
+    shipmentIds: string[];
+  }>;
+  failureReason?: string;
+  optimizedAt?: Date;
+}
+
+export type ZoneColor = 'GREEN' | 'YELLOW' | 'RED' | 'BLUE';
+
+export interface LoadingSequenceItem {
+  loadOrder: number;
+  shipmentId: string;
+  reference: string;
+  stopCode: string;
+  dropSequence: number;
+  zoneColor: ZoneColor;
+  zoneLabel: string;
+  quantity: number;
+  dimensionsCm: { length: number; width: number; height: number };
+  weightKg: number;
+  stackable: boolean;
+  handlingNotes?: string;
+  placed: boolean;
+  bedRect?: {
+    xCm: number;
+    yCm: number;
+    lengthCm: number;
+    widthCm: number;
+  };
+}
+
+export interface TripLoadingPlan {
+  zoneMapping: Array<{
+    stopCode: string;
+    dropSequence: number;
+    zoneColor: ZoneColor;
+    zoneLabel: string;
+  }>;
+  sequenceItems: LoadingSequenceItem[];
+  overflowShipmentIds: string[];
+  manualOverrides: Array<{
+    shipmentId: string;
+    note: string;
+    actorUserId: Types.ObjectId;
+    at: Date;
+  }>;
+  planningAidDisclaimer: string;
+}
+
+export interface TripBackhaulDecision {
+  decision: 'MATCHED' | 'EARLY_TURNAROUND' | 'PENDING';
+  backhaulRequestId?: Types.ObjectId;
+  requestCode?: string;
+  repositioningDistanceKm: number;
+  repositioningCostPaise: number;
+  expectedReturnRevenuePaise: number;
+  netContributionPaise: number;
+  tier1MinGuaranteeIncludedPaise: number;
+  reason: string;
+  evaluatedAt: Date;
+}
+
 export interface ITrip extends Document {
   _id: Types.ObjectId;
   tripCode: string;
@@ -48,8 +121,19 @@ export interface ITrip extends Document {
   status: TripStatus;
   plannedDepartureAt: Date;
   estimatedEndAt: Date;
+  actualStartedAt?: Date;
+  actualCompletedAt?: Date;
+  pauseReason?: string;
+  locationDisclosureAcceptedAt?: Date;
+  lastKnownLocation?: {
+    coordinates: [number, number];
+    recordedAt: Date;
+  };
   stopsSummary: TripStopSummary[];
   allocationEconomics?: TripAllocationEconomics;
+  routePlan?: TripRoutePlan;
+  loadingPlan?: TripLoadingPlan;
+  backhaulDecision?: TripBackhaulDecision;
   assignmentHistory: TripAssignmentAudit[];
   notes?: string;
   createdAt: Date;
@@ -106,6 +190,14 @@ const tripSchema = new Schema<ITrip>(
     },
     plannedDepartureAt: { type: Date, required: true },
     estimatedEndAt: { type: Date, required: true },
+    actualStartedAt: { type: Date },
+    actualCompletedAt: { type: Date },
+    pauseReason: { type: String, trim: true, maxlength: 300 },
+    locationDisclosureAcceptedAt: { type: Date },
+    lastKnownLocation: {
+      coordinates: { type: [Number] },
+      recordedAt: { type: Date },
+    },
     stopsSummary: { type: [tripStopSummarySchema], default: [] },
     allocationEconomics: {
       allocatedTier: { type: String, enum: ['TIER_1', 'TIER_2', 'TIER_3'] },
@@ -115,6 +207,41 @@ const tripSchema = new Schema<ITrip>(
       estimatedVehiclePayoutPaise: { type: Number, default: 0 },
       rightSized: { type: Boolean, default: false },
       reason: { type: String },
+    },
+    routePlan: {
+      optimizationStatus: {
+        type: String,
+        enum: ['PENDING', 'OPTIMAL', 'INFEASIBLE', 'OPTIMIZER_UNAVAILABLE'],
+      },
+      provider: { type: String, enum: ['OR_TOOLS', 'NONE'] },
+      matrixProvider: { type: String, enum: ['FIXTURE', 'OSRM'] },
+      totalDistanceMeters: { type: Number, default: 0 },
+      estimatedDurationSeconds: { type: Number, default: 0 },
+      orderedStops: { type: [Schema.Types.Mixed], default: [] },
+      failureReason: { type: String },
+      optimizedAt: { type: Date },
+    },
+    loadingPlan: {
+      zoneMapping: { type: [Schema.Types.Mixed], default: [] },
+      sequenceItems: { type: [Schema.Types.Mixed], default: [] },
+      overflowShipmentIds: { type: [String], default: [] },
+      manualOverrides: { type: [Schema.Types.Mixed], default: [] },
+      planningAidDisclaimer: { type: String },
+    },
+    backhaulDecision: {
+      decision: {
+        type: String,
+        enum: ['MATCHED', 'EARLY_TURNAROUND', 'PENDING'],
+      },
+      backhaulRequestId: { type: Schema.Types.ObjectId, ref: 'BackhaulRequest' },
+      requestCode: { type: String },
+      repositioningDistanceKm: { type: Number, default: 0 },
+      repositioningCostPaise: { type: Number, default: 0 },
+      expectedReturnRevenuePaise: { type: Number, default: 0 },
+      netContributionPaise: { type: Number, default: 0 },
+      tier1MinGuaranteeIncludedPaise: { type: Number, default: 0 },
+      reason: { type: String },
+      evaluatedAt: { type: Date },
     },
     assignmentHistory: { type: [tripAssignmentAuditSchema], default: [] },
     notes: { type: String, trim: true },
