@@ -11,6 +11,7 @@ import type { IShipment } from '../models/Shipment.js';
 import type { ISlot } from '../models/Slot.js';
 import { Trip, type TripAllocationEconomics } from '../models/Trip.js';
 import { Vehicle, type BedDimensionsCm, type IVehicle } from '../models/Vehicle.js';
+import { isSameCalendarDay, resolveSlotNumber } from './driverSlotService.js';
 
 export interface VehicleFeasibilityResult {
   feasible: boolean;
@@ -184,17 +185,29 @@ export async function allocateVehicleForPool(params: {
 
   const tier1Profiles = await DriverProfile.find({ fleetTier: 'TIER_1' }).session(session);
   const activeContracts = await DriverContract.find({ status: 'ACTIVE' }).session(session);
+  // MC-051: Allocation consumes ONLY valid LOCKED slot commitments for this exact corridor/slot/date.
   const slotCommitments = await DriverSlotCommitment.find({
     slotId: slot._id,
-    status: 'COMMITTED',
+    status: 'LOCKED',
   }).session(session);
 
   const busyVehicleIds = new Set(busyTrips.map((t) => String(t.vehicleId)));
   const busyDriverIds = new Set(busyTrips.map((t) => String(t.driverId)));
 
   const profileByDriverId = new Map(tier1Profiles.map((p) => [String(p.userId), p]));
+  const slotNum = resolveSlotNumber(slot);
   const commitmentByDriverId = new Map(
-    slotCommitments.map((c) => [String(c.driverUserId), c])
+    slotCommitments
+      .filter((c) => {
+        if (String(c.corridorId) !== String(corridor._id)) return false;
+        if (String(c.slotId) !== String(slot._id)) return false;
+        if (!isSameCalendarDay(new Date(c.departureDate), new Date(slot.departureDate))) {
+          return false;
+        }
+        if (slotNum && c.slotNumber !== slotNum) return false;
+        return true;
+      })
+      .map((c) => [String(c.driverUserId), c])
   );
   const slotDateMs = new Date(slot.departureDate).getTime();
 

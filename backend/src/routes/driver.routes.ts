@@ -216,19 +216,65 @@ router.delete('/pooling-slots/:slotId/commit', async (req, res) => {
 });
 
 router.get('/trips', async (req, res) => {
-  const trips = await Trip.find({ driverId: req.auth!.userId })
-    .populate('corridorId', 'code name stops')
-    .populate('slotId', 'slotCode label plannedDepartureAt estimatedArrivalStartAt estimatedArrivalEndAt')
-    .populate('vehicleId', 'registrationNumber vehicleClass tier maxWeightKg maxVolumeCbm bedDimensionsCm')
+  const allTrips = await Trip.find({ driverId: req.auth!.userId, quarantined: { $ne: true } })
+    .populate('corridorId', 'code name stops turnaroundBufferMin estimatedOutboundDurationMin')
+    .populate(
+      'slotId',
+      'slotNumber slotCode label departureDate plannedDepartureAt estimatedArrivalStartAt estimatedArrivalEndAt returnTimeOptions returnTimeLocked lockedReturnTime scheduleSnapshot'
+    )
+    .populate('sourceCommitmentId', 'slotNumber selectedPickupTime selectedReturnTime status departureDate')
+    .populate(
+      'vehicleId',
+      'registrationNumber vehicleClass bodyType ownershipType tier operationalStatus maxWeightKg maxVolumeCbm bedDimensionsCm'
+    )
     .populate(
       'shipmentIds',
-      'reference deliveryStopCode deliveryAddress recipientName cargo status qrToken allowB2bWarehouseConfirm pricingSnapshot pickupBalanceRequestedAt'
+      'reference deliveryStopCode pickupStopCode deliveryAddress recipientName cargo status qrToken allowB2bWarehouseConfirm pricingSnapshot pickupBalanceRequestedAt pickupBalanceCollectedAt'
     )
     .sort({ plannedDepartureAt: 1 });
 
+  // MC-051: Filter out / quarantine any inconsistent Tier 1 trips lacking valid matching commitment
+  const validTrips = [];
+  for (const trip of allTrips) {
+    const tier = trip.allocationEconomics?.allocatedTier;
+    const isTier1 = tier === 'TIER_1';
+    if (isTier1) {
+      const sc = trip.sourceCommitmentId as unknown as {
+        _id?: unknown;
+        slotNumber?: number;
+        status?: string;
+        departureDate?: Date;
+      } | null;
+      const slotObj = trip.slotId as unknown as {
+        _id?: unknown;
+        slotNumber?: number;
+        departureDate?: Date;
+      } | null;
+
+      const consistent =
+        Boolean(sc) &&
+        (sc!.status === 'ALLOCATED' || sc!.status === 'LOCKED') &&
+        (!slotObj?.slotNumber || !sc!.slotNumber || slotObj.slotNumber === sc!.slotNumber);
+
+      if (!consistent) {
+        await Trip.updateOne(
+          { _id: trip._id },
+          {
+            $set: {
+              quarantined: true,
+              quarantineReason: 'Quarantined due to missing or mismatched Tier 1 slot commitment.',
+            },
+          }
+        ).catch(() => undefined);
+        continue;
+      }
+    }
+    validTrips.push(trip);
+  }
+
   res.json({
     success: true,
-    trips,
+    trips: validTrips,
   });
 });
 
@@ -243,13 +289,21 @@ router.get('/trips/:tripId', async (req, res) => {
   const trip = await Trip.findOne({
     _id: tripId,
     driverId: req.auth!.userId,
+    quarantined: { $ne: true },
   })
-    .populate('corridorId', 'code name stops')
-    .populate('slotId', 'slotCode label plannedDepartureAt estimatedArrivalStartAt estimatedArrivalEndAt')
-    .populate('vehicleId', 'registrationNumber vehicleClass tier maxWeightKg maxVolumeCbm bedDimensionsCm')
+    .populate('corridorId', 'code name stops turnaroundBufferMin estimatedOutboundDurationMin')
+    .populate(
+      'slotId',
+      'slotNumber slotCode label departureDate plannedDepartureAt estimatedArrivalStartAt estimatedArrivalEndAt returnTimeOptions returnTimeLocked lockedReturnTime scheduleSnapshot'
+    )
+    .populate('sourceCommitmentId', 'slotNumber selectedPickupTime selectedReturnTime status departureDate')
+    .populate(
+      'vehicleId',
+      'registrationNumber vehicleClass bodyType ownershipType tier operationalStatus maxWeightKg maxVolumeCbm bedDimensionsCm'
+    )
     .populate(
       'shipmentIds',
-      'reference deliveryStopCode deliveryAddress recipientName cargo status qrToken allowB2bWarehouseConfirm pricingSnapshot pickupBalanceRequestedAt'
+      'reference deliveryStopCode pickupStopCode deliveryAddress recipientName cargo status qrToken allowB2bWarehouseConfirm pricingSnapshot pickupBalanceRequestedAt pickupBalanceCollectedAt'
     );
 
   if (!trip) {
@@ -432,6 +486,7 @@ router.post('/trips/:tripId/scan-qr', async (req, res) => {
   const tripId = Array.isArray(req.params.tripId) ? req.params.tripId[0] : req.params.tripId;
   const schema = z.object({
     qrToken: z.string().trim().min(8),
+    expectedPickupStopCode: z.string().trim().max(20).optional(),
     coordinates: coordsSchema.optional(),
     idempotencyKey: z.string().optional(),
   });
@@ -443,6 +498,7 @@ router.post('/trips/:tripId/scan-qr', async (req, res) => {
     tripId,
     driverUserId: req.auth!.userId,
     qrToken: parsed.data.qrToken,
+    expectedPickupStopCode: parsed.data.expectedPickupStopCode,
     coordinates: parsed.data.coordinates,
     idempotencyKey: parsed.data.idempotencyKey,
   });

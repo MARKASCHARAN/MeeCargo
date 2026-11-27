@@ -10,13 +10,16 @@ import {
   CloudOff,
   CreditCard,
   ExternalLink,
+  History,
   KeyRound,
+  Lock,
   MapPin,
   Navigation,
   Package,
   Pause,
   Play,
-  RefreshCw,
+  QrCode,
+  Route as RouteIcon,
   ShieldCheck,
   Truck,
   UploadCloud,
@@ -30,9 +33,9 @@ import {
   fetchDriverTrips,
   generateDeliveryOtp,
   markDriverNotificationRead,
-  optimizeDriverTripRoute,
   reportDriverTripException,
   respondToDriverTrip,
+  scanDriverQrPickup,
   submitLoadingOverride,
   syncOfflineDriverEventsBatch,
   transitionDriverTrip,
@@ -93,6 +96,8 @@ export function DriverTripsPage() {
   const [pauseTripId, setPauseTripId] = useState<string | null>(null);
   const [pauseReason, setPauseReason] = useState('');
   const [overrideNote, setOverrideNote] = useState<Record<string, string>>({});
+  const [routePlanOpenFor, setRoutePlanOpenFor] = useState<Record<string, boolean>>({});
+  const [qrInputs, setQrInputs] = useState<Record<string, string>>({});
 
   // Delivery proof state per shipment
   const [otpHints, setOtpHints] = useState<Record<string, string>>({});
@@ -102,6 +107,7 @@ export function DriverTripsPage() {
     Record<string, 'OTP' | 'B2B_WAREHOUSE_SIGN_OFF'>
   >({});
   const [podPhotos, setPodPhotos] = useState<Record<string, File | null>>({});
+  const [podConsent, setPodConsent] = useState<Record<string, boolean>>({});
   const [collectionMethods, setCollectionMethods] = useState<
     Record<string, 'SIMULATED_UPI' | 'CASH_AT_PICKUP'>
   >({});
@@ -215,20 +221,6 @@ export function DriverTripsPage() {
       setActionBanner(res.message);
       setDeclineTripId(null);
       setDeclineReason('');
-      void queryClient.invalidateQueries({ queryKey: ['driver-trips'] });
-    },
-    onError: (err: Error) => setErrorBanner(err.message),
-  });
-
-  const optimizeMutation = useMutation({
-    mutationFn: optimizeDriverTripRoute,
-    onSuccess: (res) => {
-      setErrorBanner(null);
-      setActionBanner(
-        res.optimized
-          ? 'OR-Tools route & LIFO loading plan generated.'
-          : res.routePlan?.failureReason ?? 'Route optimization failed.'
-      );
       void queryClient.invalidateQueries({ queryKey: ['driver-trips'] });
     },
     onError: (err: Error) => setErrorBanner(err.message),
@@ -404,6 +396,10 @@ export function DriverTripsPage() {
     }
     const file = podPhotos[shipmentId];
     if (file) {
+      if (!podConsent[shipmentId]) {
+        setErrorBanner('Confirm recipient photo capture consent before uploading proof.');
+        return;
+      }
       form.append('photo', file);
     }
 
@@ -560,164 +556,349 @@ export function DriverTripsPage() {
         <EmptyState
           icon={<Truck className="h-6 w-6" />}
           title="No active trip assignments"
-          description="You will see corridor trips here as soon as a locked pool is assigned to your vehicle."
+          description="You will see corridor trips here after committing to a pooling window and receiving automated allocation upon pool closure."
         />
       ) : (
         <div className="space-y-4">
-          {trips.map((trip) => (
-            <Card key={trip._id}>
-              <CardHeader className="flex items-center justify-between py-3">
-                <div>
-                  <p className="text-xs font-mono font-semibold text-emerald-700">
-                    {trip.tripCode}
-                  </p>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {trip.corridorId?.name ?? 'Corridor Assignment'}
-                  </p>
-                </div>
-                <Badge
-                  variant={
-                    trip.status === 'IN_PROGRESS' || trip.status === 'COMPLETED'
-                      ? 'success'
-                      : trip.status === 'PAUSED'
-                        ? 'warning'
-                        : 'info'
-                  }
-                >
-                  {trip.status}
-                </Badge>
-              </CardHeader>
+          {trips.map((trip) => {
+            const isTier1Trip =
+              trip.allocationEconomics?.allocatedTier === 'TIER_1' ||
+              Boolean(trip.sourceCommitmentId);
+            const isReadOnlyTrip =
+              trip.status === 'COMPLETED' ||
+              trip.status === 'CANCELLED' ||
+              trip.status === 'DRIVER_REJECTED';
 
-              <CardContent className="space-y-3 text-xs text-slate-600">
-                <div className="flex items-center gap-2">
-                  <CalendarClock className="h-4 w-4 text-slate-400" />
-                  <span>
-                    Planned Departure:{' '}
-                    <strong className="text-slate-800">
-                      {new Date(trip.plannedDepartureAt).toLocaleString()}
-                    </strong>
-                  </span>
-                </div>
+            // MC-054: Read schedule strictly from locked trip/commitment snapshot (never live template)
+            const snap = trip.scheduleSnapshot;
+            const slotNumber = snap?.slotNumber ?? trip.slotId?.slotNumber;
+            const outboundPickupTime =
+              snap?.outboundPickupTime ??
+              new Date(trip.plannedDepartureAt).toLocaleTimeString('en-IN', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+              });
+            const lockedReturnTime =
+              snap?.selectedReturnTime ??
+              trip.slotId?.lockedReturnTime ??
+              (trip.estimatedEndAt
+                ? new Date(trip.estimatedEndAt).toLocaleTimeString('en-IN', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false,
+                  })
+                : '—');
+            const isLockedReturn = Boolean(
+              snap?.returnTimeLocked ?? trip.slotId?.returnTimeLocked
+            );
+            const serviceDateLabel = snap?.serviceDate
+              ? new Date(snap.serviceDate).toLocaleDateString('en-IN', {
+                  weekday: 'short',
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+                })
+              : new Date(trip.plannedDepartureAt).toLocaleDateString('en-IN', {
+                  weekday: 'short',
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+                });
 
-                {trip.vehicleId ? (
-                  <div className="flex items-center gap-2">
-                    <Truck className="h-4 w-4 text-slate-400" />
-                    <span>
-                      Vehicle: <strong>{trip.vehicleId.registrationNumber}</strong> (
-                      {trip.vehicleId.vehicleClass} • {trip.vehicleId.tier})
-                    </span>
+            // MC-055: Use registered vehicle snapshot or vehicle dimensions cleanly
+            const effectiveBedDims =
+              trip.vehicleSnapshot?.bedDimensionsCm ?? trip.vehicleId?.bedDimensionsCm;
+            const effectiveVehicleReg =
+              trip.vehicleSnapshot?.registrationNumber ?? trip.vehicleId?.registrationNumber;
+
+            // MC-057: Determine current stop from official orderedStops / stopsSummary for pending shipments
+            const pendingShipmentStopCodes = new Set(
+              (trip.shipmentIds ?? [])
+                .filter((s) => !['DELIVERED', 'CANCELLED', 'RETURNED'].includes(s.status))
+                .map((s) =>
+                  s.status === 'LOCKED'
+                    ? (s.pickupStopCode ?? trip.stopsSummary?.[0]?.stopCode ?? '').toUpperCase()
+                    : s.deliveryStopCode.toUpperCase()
+                )
+            );
+            const orderedStops =
+              trip.routePlan?.orderedStops?.length
+                ? trip.routePlan.orderedStops
+                : (trip.stopsSummary ?? []).map((st) => ({
+                    sequence: st.sequenceOrder,
+                    stopCode: st.stopCode,
+                    name: st.name,
+                    arrivalMin: 0,
+                    cumulativeDistanceMeters: 0,
+                    shipmentIds: [] as string[],
+                  }));
+            const currentStop =
+              orderedStops.find((st) =>
+                pendingShipmentStopCodes.has(st.stopCode.toUpperCase())
+              ) ?? orderedStops[0];
+            const matchedCorridorStop = currentStop
+              ? trip.corridorId?.stops?.find(
+                  (cs) => cs.stopCode.toUpperCase() === currentStop.stopCode.toUpperCase()
+                )
+              : undefined;
+            const currentStopCoords = matchedCorridorStop?.location?.coordinates;
+            const navUrl = currentStopCoords
+              ? `https://www.google.com/maps/search/?api=1&query=${currentStopCoords[1]},${currentStopCoords[0]}`
+              : currentStop?.name
+                ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                    `${currentStop.name}, Gujarat, India`
+                  )}`
+                : null;
+
+            return (
+              <Card key={trip._id}>
+                <CardHeader className="flex items-center justify-between py-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="font-mono text-xs font-semibold text-emerald-700">
+                        {trip.tripCode}
+                      </p>
+                      {slotNumber ? (
+                        <Badge variant="neutral">Slot {slotNumber}</Badge>
+                      ) : null}
+                      {trip.sourceCommitmentId ? (
+                        <Badge variant="info">Allocated from Slot Commitment</Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                      {trip.corridorId?.code ? `${trip.corridorId.code} — ` : ''}
+                      {trip.corridorId?.name ?? 'Corridor Assignment'}
+                    </p>
                   </div>
-                ) : null}
+                  <Badge
+                    variant={
+                      trip.status === 'IN_PROGRESS' || trip.status === 'COMPLETED'
+                        ? 'success'
+                        : trip.status === 'PAUSED'
+                          ? 'warning'
+                          : trip.status === 'CANCELLED' || trip.status === 'DRIVER_REJECTED'
+                            ? 'danger'
+                            : 'info'
+                    }
+                  >
+                    {trip.status}
+                  </Badge>
+                </CardHeader>
 
-                {/* Trip Execution Controls */}
-                <div className="flex flex-wrap gap-2 border-y border-slate-100 py-2.5">
-                  {trip.status === 'ASSIGNED' ? (
-                    <>
+                <CardContent className="space-y-3 text-xs text-slate-600">
+                  {/* MC-054: Locked Schedule Snapshot */}
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5 space-y-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 font-semibold text-slate-800">
+                        <CalendarClock className="h-3.5 w-3.5 text-emerald-700" />
+                        Locked Trip Schedule ({serviceDateLabel})
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        Snapshot • Not a guaranteed ETA
+                      </span>
+                    </div>
+                    <div className="grid gap-2 pt-1 sm:grid-cols-3">
+                      <div>
+                        <span className="text-[10px] uppercase text-slate-500">Slot</span>
+                        <p className="font-semibold text-slate-900">
+                          {snap?.slotCode ?? trip.slotId?.slotCode ?? `Slot ${slotNumber ?? '—'}`}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase text-slate-500">
+                          Outbound Pickup
+                        </span>
+                        <p className="font-semibold text-slate-900">{outboundPickupTime}</p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase text-slate-500">
+                          Return Schedule
+                        </span>
+                        <p className="inline-flex items-center gap-1 font-semibold text-slate-900">
+                          {isLockedReturn ? <Lock className="h-3 w-3 text-amber-700" /> : null}
+                          {lockedReturnTime}
+                          {isLockedReturn ? ' (Locked)' : ' (Selected)'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {trip.vehicleId || trip.vehicleSnapshot ? (
+                    <div className="flex items-center gap-2">
+                      <Truck className="h-4 w-4 text-slate-400" />
+                      <span>
+                        Vehicle:{' '}
+                        <strong>
+                          {trip.vehicleSnapshot?.registrationNumber ??
+                            trip.vehicleId?.registrationNumber}
+                        </strong>{' '}
+                        ({trip.vehicleSnapshot?.vehicleClass ?? trip.vehicleId?.vehicleClass} •{' '}
+                        {trip.vehicleSnapshot?.ownershipType ??
+                          trip.allocationEconomics?.allocatedTier ??
+                          trip.vehicleId?.tier}
+                        )
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {/* MC-053 & MC-057: Trip Execution Controls */}
+                  <div className="flex flex-wrap gap-2 border-y border-slate-100 py-2.5">
+                    {/* Routine Accept/Decline ONLY for independent non-Tier-1 trips */}
+                    {!isTier1Trip && trip.status === 'ASSIGNED' ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={respondMutation.isPending}
+                          onClick={() =>
+                            respondMutation.mutate({ tripId: trip._id, decision: 'ACCEPT' })
+                          }
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          Accept Trip
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setDeclineTripId(trip._id)}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                          Decline
+                        </Button>
+                      </>
+                    ) : null}
+
+                    {['ASSIGNED', 'DRIVER_ACCEPTED'].includes(trip.status) ? (
                       <Button
                         size="sm"
                         variant="primary"
-                        disabled={respondMutation.isPending}
-                        onClick={() =>
-                          respondMutation.mutate({ tripId: trip._id, decision: 'ACCEPT' })
-                        }
+                        onClick={() => void handleTripAction(trip._id, 'start')}
                       >
-                        <Check className="h-3.5 w-3.5" />
-                        Accept Trip
+                        <Play className="h-3.5 w-3.5" />
+                        Start Trip
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setDeclineTripId(trip._id)}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                        Decline
-                      </Button>
-                    </>
-                  ) : null}
+                    ) : null}
 
-                  {['ASSIGNED', 'DRIVER_ACCEPTED'].includes(trip.status) ? (
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      onClick={() => void handleTripAction(trip._id, 'start')}
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                      Start Trip
-                    </Button>
-                  ) : null}
+                    {trip.status === 'IN_PROGRESS' ? (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setPauseTripId(trip._id)}
+                        >
+                          <Pause className="h-3.5 w-3.5" />
+                          Pause
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => void handleTripAction(trip._id, 'complete')}
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Complete Trip
+                        </Button>
+                      </>
+                    ) : null}
 
-                  {trip.status === 'IN_PROGRESS' ? (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPauseTripId(trip._id)}
-                      >
-                        <Pause className="h-3.5 w-3.5" />
-                        Pause
-                      </Button>
+                    {trip.status === 'PAUSED' ? (
                       <Button
                         size="sm"
                         variant="primary"
-                        onClick={() => void handleTripAction(trip._id, 'complete')}
+                        onClick={() => void handleTripAction(trip._id, 'resume')}
                       >
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        Complete Trip
+                        <Play className="h-3.5 w-3.5" />
+                        Resume Trip
                       </Button>
-                    </>
-                  ) : null}
+                    ) : null}
 
-                  {trip.status === 'PAUSED' ? (
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      onClick={() => void handleTripAction(trip._id, 'resume')}
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                      Resume Trip
-                    </Button>
-                  ) : null}
-
-                  {isOnline ? (
+                    {/* MC-057: View Route Plan replaces Optimize & Plan */}
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={optimizeMutation.isPending}
-                      onClick={() => optimizeMutation.mutate(trip._id)}
+                      onClick={() =>
+                        setRoutePlanOpenFor((prev) => ({
+                          ...prev,
+                          [trip._id]: !prev[trip._id],
+                        }))
+                      }
                     >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Optimize &amp; Plan
+                      <RouteIcon className="h-3.5 w-3.5" />
+                      {routePlanOpenFor[trip._id] ? 'Hide Route Plan' : 'View Route Plan'}
                     </Button>
-                  ) : null}
 
-                  {isOnline &&
-                  ['ASSIGNED', 'DRIVER_ACCEPTED', 'IN_PROGRESS', 'PAUSED'].includes(trip.status) ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const nextOpen = exceptionTripId === trip._id ? null : trip._id;
-                        setExceptionTripId(nextOpen);
-                        setExceptionReason('');
-                        setExceptionShipmentId('');
-                        setExceptionEvidence(null);
-                        if (nextOpen) {
-                          void fetchDriverTripExceptions(trip._id)
-                            .then((res) =>
-                              setTripExceptionsMap((prev) => ({
-                                ...prev,
-                                [trip._id]: res.exceptions,
-                              }))
-                            )
-                            .catch(() => undefined);
-                        }
-                      }}
-                    >
-                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
-                      Report Exception / Breakdown
-                    </Button>
-                  ) : null}
-                </div>
+                    {/* MC-057: Navigate to Current Stop */}
+                    {!isReadOnlyTrip && currentStop ? (
+                      navUrl ? (
+                        <a
+                          href={navUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          <Navigation className="h-3.5 w-3.5 text-emerald-700" />
+                          Navigate to {currentStop.stopCode}
+                        </a>
+                      ) : (
+                        <span className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 px-2.5 text-[11px] text-slate-500">
+                          Navigation unavailable for {currentStop.stopCode}
+                        </span>
+                      )
+                    ) : null}
+
+                    {/* MC-053 / MC-057: Pre-start Issue or In-Progress Route Issue */}
+                    {isOnline && !isReadOnlyTrip ? (
+                      <>
+                        {trip.status === 'IN_PROGRESS' || trip.status === 'PAUSED' ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setExceptionTripId(trip._id);
+                              setExceptionType('ROAD_BLOCKED');
+                              setExceptionReason('');
+                              setExceptionShipmentId('');
+                              setExceptionEvidence(null);
+                            }}
+                          >
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                            Report Route Issue
+                          </Button>
+                        ) : null}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const nextOpen = exceptionTripId === trip._id ? null : trip._id;
+                            setExceptionTripId(nextOpen);
+                            setExceptionType(
+                              ['ASSIGNED', 'DRIVER_ACCEPTED'].includes(trip.status)
+                                ? 'DRIVER_UNAVAILABLE'
+                                : 'VEHICLE_BREAKDOWN'
+                            );
+                            setExceptionReason('');
+                            setExceptionShipmentId('');
+                            setExceptionEvidence(null);
+                            if (nextOpen) {
+                              void fetchDriverTripExceptions(trip._id)
+                                .then((res) =>
+                                  setTripExceptionsMap((prev) => ({
+                                    ...prev,
+                                    [trip._id]: res.exceptions,
+                                  }))
+                                )
+                                .catch(() => undefined);
+                            }
+                          }}
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                          {['ASSIGNED', 'DRIVER_ACCEPTED'].includes(trip.status)
+                            ? 'Report Issue / Cannot Operate'
+                            : 'Report Exception'}
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
 
                 {exceptionTripId === trip._id ? (
                   <div className="space-y-2.5 rounded-lg border border-rose-200 bg-rose-50/70 p-3 text-xs">
@@ -905,29 +1086,66 @@ export function DriverTripsPage() {
                   </div>
                 ) : null}
 
-                {trip.routePlan ? (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-[11px]">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-800">
+                {trip.routePlan && routePlanOpenFor[trip._id] ? (
+                  <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[11px]">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-900">
                         <Navigation className="mr-1 inline h-3.5 w-3.5 text-emerald-700" />
-                        Route Optimization: {trip.routePlan.optimizationStatus}
+                        Official Route v{trip.routePlan.routeVersion ?? 1} (
+                        {trip.routePlan.optimizationStatus})
                       </span>
-                      <span>Matrix: {trip.routePlan.matrixProvider}</span>
+                      <span className="text-slate-500">
+                        Backend Matrix: {trip.routePlan.matrixProvider}
+                      </span>
                     </div>
                     {trip.routePlan.optimizationStatus === 'OPTIMAL' ? (
-                      <p className="mt-1 text-slate-700">
-                        Road Distance:{' '}
-                        <strong>
-                          {(trip.routePlan.totalDistanceMeters / 1000).toFixed(1)} km
-                        </strong>{' '}
-                        • Est. Drive:{' '}
-                        <strong>
-                          {Math.round(trip.routePlan.estimatedDurationSeconds / 60)} min
-                        </strong>
-                      </p>
+                      <>
+                        <p className="text-slate-700">
+                          Road Distance:{' '}
+                          <strong>
+                            {(trip.routePlan.totalDistanceMeters / 1000).toFixed(1)} km
+                          </strong>{' '}
+                          • Est. Drive:{' '}
+                          <strong>
+                            {Math.round(trip.routePlan.estimatedDurationSeconds / 60)} min
+                          </strong>
+                        </p>
+                        {trip.routePlan.orderedStops.length > 0 ? (
+                          <div className="space-y-1 border-t border-slate-200 pt-1.5">
+                            {trip.routePlan.orderedStops.map((st) => (
+                              <div
+                                key={`${st.sequence}-${st.stopCode}`}
+                                className="flex items-center justify-between text-slate-700"
+                              >
+                                <span>
+                                  {st.sequence + 1}. <strong>{st.stopCode}</strong> — {st.name}
+                                </span>
+                                <span className="text-slate-500">
+                                  {(st.cumulativeDistanceMeters / 1000).toFixed(1)} km • +
+                                  {st.arrivalMin}m
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </>
                     ) : (
-                      <p className="mt-1 text-rose-700">{trip.routePlan.failureReason}</p>
+                      <p className="text-rose-700">{trip.routePlan.failureReason}</p>
                     )}
+
+                    {(trip.routePlan.routeHistory ?? []).length > 0 ? (
+                      <div className="border-t border-slate-200 pt-1.5 text-[10px] text-slate-500">
+                        <p className="inline-flex items-center gap-1 font-semibold text-slate-600">
+                          <History className="h-3 w-3" /> Route Version Audit History
+                        </p>
+                        {trip.routePlan.routeHistory!.map((h) => (
+                          <p key={h.version}>
+                            v{h.version} (superseded {new Date(h.supersededAt).toLocaleString('en-IN')})
+                            {h.reason ? ` — ${h.reason}` : ''}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -935,20 +1153,29 @@ export function DriverTripsPage() {
                   <div className="flex items-start gap-2 pt-1">
                     <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                     <div className="flex flex-wrap gap-1.5">
-                      {trip.stopsSummary.map((stop) => (
-                        <a
-                          key={stop.stopCode}
-                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                            `${stop.name}, Gujarat, India`
-                          )}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-200"
-                        >
-                          {stop.sequenceOrder + 1}. {stop.name}
-                          <ExternalLink className="h-2.5 w-2.5" />
-                        </a>
-                      ))}
+                      {trip.stopsSummary.map((stop) => {
+                        const cStop = trip.corridorId?.stops?.find(
+                          (cs) => cs.stopCode.toUpperCase() === stop.stopCode.toUpperCase()
+                        );
+                        const coords = cStop?.location?.coordinates;
+                        const stopMapHref = coords
+                          ? `https://www.google.com/maps/search/?api=1&query=${coords[1]},${coords[0]}`
+                          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                              `${stop.name}, Gujarat, India`
+                            )}`;
+                        return (
+                          <a
+                            key={stop.stopCode}
+                            href={stopMapHref}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-200"
+                          >
+                            {stop.sequenceOrder + 1}. {stop.name}
+                            <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        );
+                      })}
                     </div>
                   </div>
                 ) : null}
@@ -1001,68 +1228,123 @@ export function DriverTripsPage() {
                           ) : null}
 
                           {(sh.pricingSnapshot?.remainingBalancePaise ?? 0) > 0 ? (
-                            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 p-2">
-                              <div>
-                                <p className="font-semibold text-sky-950">
-                                  Pickup Balance Due:{' '}
+                            sh.pickupBalanceCollectedAt ? (
+                              <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-emerald-900">
+                                <span className="font-semibold">
+                                  Pickup Balance Collected:{' '}
                                   {formatPaise(sh.pricingSnapshot?.remainingBalancePaise)}
-                                </p>
-                                <p className="text-[10px] text-sky-800">
-                                  Simulated collection record (distinct from settlement)
-                                </p>
+                                </span>
+                                <Badge variant="success">COLLECTED (Distinct from Settlement)</Badge>
                               </div>
-                              <div className="flex items-center gap-1.5">
-                                <select
-                                  value={collectionMethods[sh._id] ?? 'SIMULATED_UPI'}
-                                  onChange={(e) =>
-                                    setCollectionMethods((prev) => ({
-                                      ...prev,
-                                      [sh._id]: e.target.value as
-                                        | 'SIMULATED_UPI'
-                                        | 'CASH_AT_PICKUP',
-                                    }))
-                                  }
-                                  className="rounded border border-sky-300 bg-white px-1.5 py-1 text-[10px]"
-                                >
-                                  <option value="SIMULATED_UPI">Simulated UPI</option>
-                                  <option value="CASH_AT_PICKUP">Cash at Pickup</option>
-                                </select>
-                                <Button
-                                  size="sm"
-                                  variant="primary"
-                                  onClick={() => {
-                                    void collectDriverPickupBalance(trip._id, sh._id, {
-                                      paymentMethod:
-                                        collectionMethods[sh._id] ?? 'SIMULATED_UPI',
-                                      idempotencyKey: `col_${trip._id}_${sh._id}`,
-                                    })
-                                      .then((res) => {
-                                        setActionBanner(
-                                          `Collected ${formatPaise(
-                                            res.collection.collectedAmountPaise
-                                          )} (${res.collection.providerRef}, state: ${
-                                            res.collection.collectionState
-                                          } / settlement: ${
-                                            res.collection.settlementState
-                                          }).`
-                                        );
-                                        void queryClient.invalidateQueries({
-                                          queryKey: ['driver-trips'],
-                                        });
+                            ) : (
+                              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 p-2">
+                                <div>
+                                  <p className="font-semibold text-sky-950">
+                                    Pickup Balance Due:{' '}
+                                    {formatPaise(sh.pricingSnapshot?.remainingBalancePaise)}
+                                  </p>
+                                  <p className="text-[10px] text-sky-800">
+                                    Simulated collection record — distinct from driver payout/settlement
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <select
+                                    value={collectionMethods[sh._id] ?? 'SIMULATED_UPI'}
+                                    onChange={(e) =>
+                                      setCollectionMethods((prev) => ({
+                                        ...prev,
+                                        [sh._id]: e.target.value as
+                                          | 'SIMULATED_UPI'
+                                          | 'CASH_AT_PICKUP',
+                                      }))
+                                    }
+                                    className="rounded border border-sky-300 bg-white px-1.5 py-1 text-[10px]"
+                                  >
+                                    <option value="SIMULATED_UPI">Simulated UPI</option>
+                                    <option value="CASH_AT_PICKUP">Cash at Pickup</option>
+                                  </select>
+                                  <Button
+                                    size="sm"
+                                    variant="primary"
+                                    disabled={!isOnline}
+                                    onClick={() => {
+                                      void collectDriverPickupBalance(trip._id, sh._id, {
+                                        paymentMethod:
+                                          collectionMethods[sh._id] ?? 'SIMULATED_UPI',
+                                        idempotencyKey: `col_${trip._id}_${sh._id}`,
                                       })
-                                      .catch((err) =>
-                                        setErrorBanner(
-                                          err instanceof Error
-                                            ? err.message
-                                            : 'Collection failed'
-                                        )
-                                      );
-                                  }}
-                                >
-                                  <CreditCard className="h-3 w-3" />
-                                  Record Collection
-                                </Button>
+                                        .then((res) => {
+                                          setActionBanner(
+                                            `Collected ${formatPaise(
+                                              res.collection.collectedAmountPaise
+                                            )} (${res.collection.providerRef}, state: ${
+                                              res.collection.collectionState
+                                            } / settlement: ${
+                                              res.collection.settlementState
+                                            }).`
+                                          );
+                                          void queryClient.invalidateQueries({
+                                            queryKey: ['driver-trips'],
+                                          });
+                                        })
+                                        .catch((err) =>
+                                          setErrorBanner(
+                                            err instanceof Error
+                                              ? err.message
+                                              : 'Collection failed'
+                                          )
+                                        );
+                                    }}
+                                  >
+                                    <CreditCard className="h-3 w-3" />
+                                    Record Collection
+                                  </Button>
+                                </div>
                               </div>
+                            )
+                          ) : null}
+
+                          {/* MC-056: Inline QR Pickup Verification for LOCKED shipments */}
+                          {sh.status === 'LOCKED' && isOnline && !isReadOnlyTrip ? (
+                            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 p-2">
+                              <QrCode className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
+                              <input
+                                value={qrInputs[sh._id] ?? ''}
+                                onChange={(e) =>
+                                  setQrInputs((prev) => ({ ...prev, [sh._id]: e.target.value }))
+                                }
+                                placeholder={`Verify pickup QR at ${sh.pickupStopCode ?? 'origin'}...`}
+                                className="min-w-[160px] flex-1 rounded border border-emerald-300 bg-white px-2 py-1 font-mono text-[11px]"
+                              />
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                disabled={!(qrInputs[sh._id] ?? '').trim()}
+                                onClick={() => {
+                                  const token = (qrInputs[sh._id] ?? '').trim();
+                                  void scanDriverQrPickup(trip._id, {
+                                    qrToken: token,
+                                    expectedPickupStopCode: sh.pickupStopCode,
+                                    idempotencyKey: `qr_${trip._id}_${token}`,
+                                  })
+                                    .then((res) => {
+                                      setErrorBanner(null);
+                                      setActionBanner(
+                                        `QR verified for ${res.shipment.reference} pickup.`
+                                      );
+                                      void queryClient.invalidateQueries({
+                                        queryKey: ['driver-trips'],
+                                      });
+                                    })
+                                    .catch((err) =>
+                                      setErrorBanner(
+                                        err instanceof Error ? err.message : 'QR verification failed'
+                                      )
+                                    );
+                                }}
+                              >
+                                Verify Pickup QR
+                              </Button>
                             </div>
                           ) : null}
 
@@ -1102,6 +1384,24 @@ export function DriverTripsPage() {
                                 }
                               >
                                 At Destination
+                              </Button>
+                            ) : null}
+
+                            {['PICKED_UP', 'IN_TRANSIT', 'AT_DESTINATION'].includes(sh.status) &&
+                            isOnline ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setExceptionTripId(trip._id);
+                                  setExceptionShipmentId(sh._id);
+                                  setExceptionType('CUSTOMER_UNAVAILABLE');
+                                  setExceptionReason('');
+                                  setExceptionEvidence(null);
+                                }}
+                              >
+                                <AlertTriangle className="h-3 w-3 text-amber-600" />
+                                Report Failed Delivery
                               </Button>
                             ) : null}
                           </div>
@@ -1175,25 +1475,42 @@ export function DriverTripsPage() {
                                 />
                               )}
 
-                              <div className="flex flex-wrap items-center justify-between gap-2">
-                                <input
-                                  type="file"
-                                  accept="image/jpeg,image/png,image/webp"
-                                  onChange={(e) =>
-                                    setPodPhotos((prev) => ({
-                                      ...prev,
-                                      [sh._id]: e.target.files?.[0] ?? null,
-                                    }))
-                                  }
-                                  className="max-w-[200px] text-[10px] text-slate-600"
-                                />
-                                <Button
-                                  size="sm"
-                                  variant="primary"
-                                  onClick={() => void handleDeliver(trip._id, sh._id)}
-                                >
-                                  Confirm Delivery
-                                </Button>
+                              <div className="space-y-1.5">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    onChange={(e) =>
+                                      setPodPhotos((prev) => ({
+                                        ...prev,
+                                        [sh._id]: e.target.files?.[0] ?? null,
+                                      }))
+                                    }
+                                    className="max-w-[200px] text-[10px] text-slate-600"
+                                  />
+                                  <Button
+                                    size="sm"
+                                    variant="primary"
+                                    onClick={() => void handleDeliver(trip._id, sh._id)}
+                                  >
+                                    Confirm Delivery
+                                  </Button>
+                                </div>
+                                {podPhotos[sh._id] ? (
+                                  <label className="flex items-center gap-1.5 text-[10px] text-slate-600">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(podConsent[sh._id])}
+                                      onChange={(e) =>
+                                        setPodConsent((prev) => ({
+                                          ...prev,
+                                          [sh._id]: e.target.checked,
+                                        }))
+                                      }
+                                    />
+                                    Recipient consent obtained for delivery proof photo
+                                  </label>
+                                ) : null}
                               </div>
                             </div>
                           ) : null}
@@ -1203,15 +1520,15 @@ export function DriverTripsPage() {
                   </div>
                 ) : null}
 
-                {/* LIFO Manifest + 2D Truck-Bed Visualizer */}
-                {trip.loadingPlan && trip.vehicleId ? (
-                  <div className="space-y-3 pt-1">
-                    <TruckBedVisualizer
-                      bedDimensionsCm={trip.vehicleId.bedDimensionsCm}
-                      loadingPlan={trip.loadingPlan}
-                    />
+                {/* MC-055: LIFO Manifest + 2D Truck-Bed Visualizer using registered vehicle dims */}
+                <div className="space-y-3 pt-1">
+                  <TruckBedVisualizer
+                    bedDimensionsCm={effectiveBedDims}
+                    vehicleLabel={effectiveVehicleReg}
+                    loadingPlan={trip.loadingPlan}
+                  />
 
-                    {trip.loadingPlan.sequenceItems.length > 0 ? (
+                  {trip.loadingPlan && trip.loadingPlan.sequenceItems.length > 0 ? (
                       <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-900">
                           <Package className="h-3.5 w-3.5 text-emerald-700" />
@@ -1262,31 +1579,68 @@ export function DriverTripsPage() {
                         ))}
                       </div>
                     ) : null}
-                  </div>
-                ) : null}
+                </div>
 
-                {trip.backhaulDecision ? (
-                  <div className="rounded-lg border border-sky-200 bg-sky-50 p-2.5 text-[11px] text-sky-950">
+                {/* MC-054: Return Plan (always renders explicit scheduled or empty return state) */}
+                <div className="space-y-1.5 rounded-lg border border-sky-200 bg-sky-50 p-3 text-[11px] text-sky-950">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-semibold">
-                      Return Plan: {trip.backhaulDecision.decision}
-                      {trip.backhaulDecision.requestCode
-                        ? ` (${trip.backhaulDecision.requestCode})`
-                        : ''}
+                      Return Plan:{' '}
+                      {trip.backhaulDecision?.decision === 'MATCHED'
+                        ? `Backhaul Assigned (${trip.backhaulDecision.requestCode ?? 'Matched'})`
+                        : 'Scheduled Empty Return'}
                     </p>
-                    <p className="mt-0.5">{trip.backhaulDecision.reason}</p>
-                    {trip.backhaulDecision.decision === 'MATCHED' ? (
-                      <p className="mt-0.5">
-                        Return Revenue:{' '}
+                    <Badge
+                      variant={
+                        trip.backhaulDecision?.decision === 'MATCHED' ? 'success' : 'neutral'
+                      }
+                    >
+                      Return Time:{' '}
+                      {trip.backhaulDecision?.scheduledReturnTime ?? lockedReturnTime}
+                    </Badge>
+                  </div>
+
+                  {trip.backhaulDecision?.decision === 'MATCHED' ? (
+                    <div className="space-y-1">
+                      <p>{trip.backhaulDecision.reason}</p>
+                      {trip.backhaulDecision.returnCargoSummary ? (
+                        <p>
+                          Return Cargo ({trip.backhaulDecision.returnShipmentCount ?? 1} shipment):{' '}
+                          <strong>{trip.backhaulDecision.returnCargoSummary}</strong>
+                        </p>
+                      ) : null}
+                      {(trip.backhaulDecision.returnStops ?? []).length > 0 ? (
+                        <p>
+                          Return Stops:{' '}
+                          {trip.backhaulDecision.returnStops!
+                            .map((rs) => `${rs.stopCode} (${rs.action.replace('_', ' ')})`)
+                            .join(' → ')}
+                        </p>
+                      ) : null}
+                      <p>
+                        Est. Return Revenue Contribution:{' '}
                         <strong>
                           {formatPaise(trip.backhaulDecision.expectedReturnRevenuePaise)}
                         </strong>
                       </p>
-                    ) : null}
-                  </div>
-                ) : null}
+                    </div>
+                  ) : (
+                    <p>
+                      {trip.backhaulDecision?.reason ??
+                        'Scheduled empty return — no return backhaul cargo allocated for this window.'}
+                    </p>
+                  )}
+
+                  {trip.backhaulDecision?.evaluatedAt ? (
+                    <p className="text-[10px] text-sky-800">
+                      Last updated: {new Date(trip.backhaulDecision.evaluatedAt).toLocaleString('en-IN')}
+                    </p>
+                  ) : null}
+                </div>
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -40,14 +40,60 @@ export function buildLifoLoadingPlan(params: {
     >
   >;
   bedDimensionsCm: BedDimensionsCm;
+  vehicleLimits?: { maxWeightKg?: number; maxVolumeCbm?: number };
   existingManualOverrides?: TripLoadingPlan['manualOverrides'];
 }): TripLoadingPlan {
   const {
     orderedStops,
     shipments,
     bedDimensionsCm,
+    vehicleLimits,
     existingManualOverrides = [],
   } = params;
+
+  const missingDimensions: string[] = [];
+  if (
+    !bedDimensionsCm ||
+    !(bedDimensionsCm.length > 0) ||
+    !(bedDimensionsCm.width > 0) ||
+    !(bedDimensionsCm.height > 0)
+  ) {
+    missingDimensions.push('Vehicle internal bed dimensions (length × width × height cm)');
+  }
+
+  for (const s of shipments) {
+    const dims = s.cargo?.unitDimensionsCm;
+    if (!dims || !(dims.length > 0) || !(dims.width > 0) || !(dims.height > 0)) {
+      missingDimensions.push(`Shipment ${s.reference} unit dimensions`);
+    }
+  }
+
+  if (missingDimensions.length > 0) {
+    return {
+      zoneMapping: [],
+      sequenceItems: [],
+      overflowShipmentIds: shipments.map((s) => String(s._id)),
+      manualOverrides: existingManualOverrides,
+      planningAidDisclaimer: LOADING_PLANNING_AID_DISCLAIMER,
+      planStatus: 'UNAVAILABLE_MISSING_DIMENSIONS',
+      missingDimensions,
+      capacityIssues: [],
+    };
+  }
+
+  const capacityIssues: string[] = [];
+  const totalWeightKg = shipments.reduce((sum, s) => sum + (s.cargo.chargeableWeightKg ?? 0), 0);
+  const totalVolumeCbm = shipments.reduce((sum, s) => sum + (s.cargo.volumeCbm ?? 0), 0);
+  if (vehicleLimits?.maxWeightKg && totalWeightKg > vehicleLimits.maxWeightKg) {
+    capacityIssues.push(
+      `Payload weight (${totalWeightKg.toFixed(1)} kg) exceeds registered vehicle max (${vehicleLimits.maxWeightKg} kg).`
+    );
+  }
+  if (vehicleLimits?.maxVolumeCbm && totalVolumeCbm > vehicleLimits.maxVolumeCbm) {
+    capacityIssues.push(
+      `Total cargo volume (${totalVolumeCbm.toFixed(2)} m³) exceeds registered vehicle max (${vehicleLimits.maxVolumeCbm} m³).`
+    );
+  }
 
   // Exclude origin depot (sequence === 0) for destination drop zones
   const deliveryStops = orderedStops
@@ -105,15 +151,17 @@ export function buildLifoLoadingPlan(params: {
     const { length, width, height } = shipment.cargo.unitDimensionsCm;
     const shipmentId = String(shipment._id);
 
-    // Compute approximate floor footprint for quantity (side-by-side or stacked if stackable)
+    // Compute accurate floor footprint for quantity using stackable height layers + grid columns
     const layers = shipment.cargo.stackable
       ? Math.max(1, Math.floor(bedDimensionsCm.height / height))
       : 1;
-    const floorUnits = Math.ceil(shipment.cargo.quantity / layers);
+    const floorUnits = Math.ceil(Math.max(1, shipment.cargo.quantity) / layers);
+    const maxColsAcrossWidth = Math.max(1, Math.floor(bedDimensionsCm.width / width));
+    const cols = Math.min(floorUnits, maxColsAcrossWidth);
+    const rows = Math.ceil(floorUnits / cols);
 
-    // Use actual footprint without shrinking oversized cargo into the bed
-    const itemLen = length;
-    const itemWid = width * Math.min(floorUnits, 2);
+    const itemLen = length * rows;
+    const itemWid = width * cols;
 
     let placed = false;
     let bedRect: LoadingSequenceItem['bedRect'] | undefined;
@@ -161,6 +209,9 @@ export function buildLifoLoadingPlan(params: {
 
     if (!placed) {
       overflowShipmentIds.push(shipmentId);
+      capacityIssues.push(
+        `Cargo ${shipment.reference} (${length}×${width}×${height} cm, qty ${shipment.cargo.quantity}) does not fit in ${bedDimensionsCm.length}×${bedDimensionsCm.width}×${bedDimensionsCm.height} cm bed.`
+      );
     }
 
     sequenceItems.push({
@@ -187,6 +238,9 @@ export function buildLifoLoadingPlan(params: {
     overflowShipmentIds,
     manualOverrides: existingManualOverrides,
     planningAidDisclaimer: LOADING_PLANNING_AID_DISCLAIMER,
+    planStatus: capacityIssues.length > 0 || overflowShipmentIds.length > 0 ? 'OVER_CAPACITY' : 'READY',
+    missingDimensions: [],
+    capacityIssues,
   };
 }
 

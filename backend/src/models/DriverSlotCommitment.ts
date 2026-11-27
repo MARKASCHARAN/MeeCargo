@@ -2,8 +2,10 @@ import mongoose, { Document, Schema, Types } from 'mongoose';
 
 export type DriverSlotCommitmentStatus =
   | 'COMMITTED'
+  | 'LOCKED'
   | 'WITHDRAWN'
   | 'ALLOCATED'
+  | 'NOT_ALLOCATED'
   | 'EXPIRED'
   | 'INVALIDATED';
 
@@ -21,6 +23,7 @@ export interface IDriverSlotCommitment extends Document {
   status: DriverSlotCommitmentStatus;
   invalidationReason?: string;
   committedAt: Date;
+  lockedAt?: Date;
   withdrawnAt?: Date;
   allocatedAt?: Date;
   createdAt: Date;
@@ -83,7 +86,7 @@ const driverSlotCommitmentSchema = new Schema<IDriverSlotCommitment>(
     },
     status: {
       type: String,
-      enum: ['COMMITTED', 'WITHDRAWN', 'ALLOCATED', 'EXPIRED', 'INVALIDATED'],
+      enum: ['COMMITTED', 'LOCKED', 'WITHDRAWN', 'ALLOCATED', 'NOT_ALLOCATED', 'EXPIRED', 'INVALIDATED'],
       default: 'COMMITTED',
       required: true,
       index: true,
@@ -96,6 +99,9 @@ const driverSlotCommitmentSchema = new Schema<IDriverSlotCommitment>(
       type: Date,
       default: Date.now,
       required: true,
+    },
+    lockedAt: {
+      type: Date,
     },
     withdrawnAt: {
       type: Date,

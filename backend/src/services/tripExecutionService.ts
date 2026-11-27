@@ -3,9 +3,12 @@ import { isValidObjectId, Types } from 'mongoose';
 import { env } from '../config/env.js';
 import { withTransaction } from '../config/database.js';
 import { DeliveryProof } from '../models/DeliveryProof.js';
+import { DriverProfile } from '../models/DriverProfile.js';
+import { DriverSlotCommitment } from '../models/DriverSlotCommitment.js';
 import { isValidShipmentTransition, Shipment } from '../models/Shipment.js';
 import { Trip, type TripStatus } from '../models/Trip.js';
 import { TripEvent, type TripEventType } from '../models/TripEvent.js';
+import { Vehicle } from '../models/Vehicle.js';
 import { emitShipmentProgress } from '../socket/poolGateway.js';
 import { HttpError } from '../utils/errors.js';
 import { sendLifecycleNotification } from './notificationService.js';
@@ -94,9 +97,65 @@ export async function transitionTripExecutionState(params: {
     );
   }
 
+  if (trip.quarantined) {
+    throw new HttpError(
+      409,
+      trip.quarantineReason || 'Trip is quarantined due to commitment inconsistency and cannot be executed.',
+      'TRIP_QUARANTINED'
+    );
+  }
+
   let eventType: TripEventType;
   if (targetStatus === 'IN_PROGRESS') {
+    const isInitialStart = trip.status === 'ASSIGNED' || trip.status === 'DRIVER_ACCEPTED';
     eventType = trip.status === 'PAUSED' ? 'TRIP_RESUMED' : 'TRIP_STARTED';
+
+    if (isInitialStart) {
+      // MC-053: Backend enforcement of start window, active driver, active vehicle, & valid Tier 1 commitment
+      const earlyLeadWindowMs = 12 * 60 * 60 * 1000;
+      const earliestAllowedStart = new Date(trip.plannedDepartureAt.getTime() - earlyLeadWindowMs);
+      if (occurredAt < earliestAllowedStart) {
+        throw new HttpError(
+          409,
+          `Trip ${trip.tripCode} cannot be started more than 12 hours before its planned departure (${trip.plannedDepartureAt.toISOString()}).`,
+          'TOO_EARLY_TO_START'
+        );
+      }
+
+      const driverProfile = await DriverProfile.findOne({ userId: driverUserId });
+      if (driverProfile && driverProfile.accountStatus !== 'ACTIVE') {
+        throw new HttpError(
+          403,
+          `Driver account is ${driverProfile.accountStatus} and cannot start trips.`,
+          'DRIVER_INACTIVE'
+        );
+      }
+
+      const vehicle = await Vehicle.findById(trip.vehicleId);
+      if (vehicle && (vehicle.operationalStatus !== 'ACTIVE' || !vehicle.isAvailable)) {
+        throw new HttpError(
+          409,
+          `Assigned vehicle ${vehicle.registrationNumber} is currently ${vehicle.operationalStatus} and cannot start trips.`,
+          'VEHICLE_INACTIVE'
+        );
+      }
+
+      if (trip.sourceCommitmentId) {
+        const commitment = await DriverSlotCommitment.findById(trip.sourceCommitmentId);
+        if (
+          !commitment ||
+          !['ALLOCATED', 'LOCKED'].includes(commitment.status) ||
+          String(commitment.driverUserId) !== String(driverUserId)
+        ) {
+          throw new HttpError(
+            409,
+            'Source slot commitment is invalid or no longer active.',
+            'COMMITMENT_MISMATCH'
+          );
+        }
+      }
+    }
+
     if (!trip.actualStartedAt) {
       trip.actualStartedAt = occurredAt;
     }
@@ -168,10 +227,12 @@ export async function scanShipmentQrForPickup(params: {
   tripId: string;
   driverUserId: string;
   qrToken: string;
+  expectedPickupStopCode?: string;
   coordinates?: [number, number];
   idempotencyKey?: string;
 }) {
-  const { tripId, driverUserId, qrToken, coordinates, idempotencyKey } = params;
+  const { tripId, driverUserId, qrToken, expectedPickupStopCode, coordinates, idempotencyKey } =
+    params;
   if (!isValidObjectId(tripId)) {
     throw new HttpError(400, 'Invalid trip ID', 'VALIDATION_ERROR');
   }
@@ -179,6 +240,14 @@ export async function scanShipmentQrForPickup(params: {
   const trip = await Trip.findOne({ _id: tripId, driverId: driverUserId });
   if (!trip) {
     throw new HttpError(403, 'Trip not found or not assigned to you', 'FORBIDDEN');
+  }
+
+  if (trip.status === 'CANCELLED' || trip.status === 'DRIVER_REJECTED' || trip.status === 'COMPLETED') {
+    throw new HttpError(
+      409,
+      `Cannot scan pickup QR while trip is ${trip.status}.`,
+      'TRIP_NOT_ACTIVE'
+    );
   }
 
   const shipment = await Shipment.findOne({ qrToken: qrToken.trim() });
@@ -195,6 +264,18 @@ export async function scanShipmentQrForPickup(params: {
       422,
       `Wrong trip: shipment ${shipment.reference} is not on manifest for ${trip.tripCode}.`,
       'WRONG_TRIP_SHIPMENT'
+    );
+  }
+
+  if (
+    expectedPickupStopCode &&
+    shipment.pickupStopCode &&
+    shipment.pickupStopCode.toUpperCase() !== expectedPickupStopCode.trim().toUpperCase()
+  ) {
+    throw new HttpError(
+      422,
+      `Wrong pickup stop: shipment ${shipment.reference} is scheduled at ${shipment.pickupStopCode}, not ${expectedPickupStopCode.toUpperCase()}.`,
+      'WRONG_PICKUP_STOP'
     );
   }
 

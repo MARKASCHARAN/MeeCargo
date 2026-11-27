@@ -192,9 +192,10 @@ describe('Stage 5 Fleet Tiers, Automated Allocation & Driver Assignment (MC-018 
           driverProfileId: new Types.ObjectId(),
           vehicleId: tier1._id,
           slotNumber: 1,
+          departureDate: new Date('2026-11-28'),
           selectedPickupTime: '09:00',
           selectedReturnTime: '14:00',
-          status: 'COMMITTED',
+          status: 'LOCKED',
         },
       ]),
     })) as never);

@@ -167,6 +167,12 @@ export async function evaluateBackhaulForTrip(params: {
     .filter((c) => c.feasible)
     .sort((a, b) => b.netContributionPaise - a.netContributionPaise)[0];
 
+  const scheduledReturnTime =
+    trip.scheduleSnapshot?.selectedReturnTime ??
+    (trip.estimatedEndAt
+      ? new Date(trip.estimatedEndAt).toTimeString().slice(0, 5)
+      : undefined);
+
   if (!best) {
     const decision = {
       decision: 'EARLY_TURNAROUND' as const,
@@ -175,10 +181,14 @@ export async function evaluateBackhaulForTrip(params: {
       expectedReturnRevenuePaise: 0,
       netContributionPaise: 0,
       tier1MinGuaranteeIncludedPaise: tier1MinGuarantee,
+      scheduledReturnTime,
+      returnStops: [],
+      returnShipmentCount: 0,
+      emptyReturn: true,
       reason:
         confirmedRequests.length === 0
-          ? 'No confirmed backhaul requests available; proposing early turnaround.'
-          : 'No confirmed backhaul met capacity, driver schedule, and positive contribution rules; proposing early turnaround.',
+          ? 'Scheduled empty return — no return backhaul cargo allocated.'
+          : 'Scheduled empty return — no confirmed backhaul met capacity, schedule, and contribution rules.',
       evaluatedAt: new Date(),
     };
 
@@ -198,6 +208,22 @@ export async function evaluateBackhaulForTrip(params: {
     expectedReturnRevenuePaise: best.expectedRevenuePaise,
     netContributionPaise: best.netContributionPaise,
     tier1MinGuaranteeIncludedPaise: tier1MinGuarantee,
+    scheduledReturnTime,
+    returnStops: [
+      {
+        stopCode: best.request.originStopCode,
+        name: best.request.originStopCode,
+        action: 'PICKUP_BACKHAUL',
+      },
+      {
+        stopCode: best.request.destinationStopCode,
+        name: best.request.destinationStopCode,
+        action: 'DROP_BACKHAUL',
+      },
+    ],
+    returnShipmentCount: 1,
+    returnCargoSummary: `${best.request.cargo.chargeableWeightKg} kg • ${best.request.cargo.declaredContents}`,
+    emptyReturn: false,
     reason: `Matched confirmed backhaul ${best.request.requestCode} (+₹${(
       best.netContributionPaise / 100
     ).toFixed(2)} net contribution; Tier 1 min guarantee preserved).`,

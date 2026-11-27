@@ -396,15 +396,18 @@ describe('MC-045 to MC-050: Corridor Lifecycle, Slot Templates, Filters & Driver
 
     // 2. Listing open slots shows eligible templates & non-fixed eligibility
     vi.spyOn(DriverProfile, 'findOne').mockResolvedValueOnce(driverProfileDoc as never);
-    vi.spyOn(DriverSlotCommitment, 'find').mockReturnValueOnce({
-      populate: vi.fn().mockReturnValue({
+    vi.spyOn(DriverSlotCommitment, 'find')
+      .mockReturnValueOnce({
         populate: vi.fn().mockReturnValue({
-          sort: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([]),
+          populate: vi.fn().mockReturnValue({
+            sort: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue([]),
+            }),
           }),
         }),
-      }),
-    } as never);
+      } as never)
+      .mockResolvedValueOnce([] as never)
+      .mockResolvedValueOnce([] as never);
     vi.spyOn(Vehicle, 'findById').mockResolvedValueOnce(vehicleDoc as never);
     vi.spyOn(DriverContract, 'find').mockResolvedValueOnce([contractDoc] as never);
     vi.spyOn(Corridor, 'find').mockResolvedValueOnce([corridorDoc] as never);
@@ -412,7 +415,9 @@ describe('MC-045 to MC-050: Corridor Lifecycle, Slot Templates, Filters & Driver
       sort: vi.fn().mockResolvedValue([slot1Doc, slot2Doc]),
     } as never);
     vi.spyOn(Pool, 'find').mockResolvedValueOnce([] as never);
-    vi.spyOn(DriverSlotCommitment, 'find').mockResolvedValueOnce([] as never);
+    vi.spyOn(Trip, 'find').mockReturnValueOnce({
+      select: vi.fn().mockResolvedValue([]),
+    } as never);
 
     const openList = await listOpenPoolingSlotsForDriver({
       driverUserId: String(driverUserId),
@@ -491,6 +496,8 @@ describe('MC-045 to MC-050: Corridor Lifecycle, Slot Templates, Filters & Driver
       session: vi.fn().mockResolvedValue([
         {
           slotId: slot1Id,
+          corridorId,
+          slotNumber: 1,
           departureDate: tomorrow,
           selectedPickupTime: '08:30',
           selectedReturnTime: '16:00',
@@ -498,13 +505,21 @@ describe('MC-045 to MC-050: Corridor Lifecycle, Slot Templates, Filters & Driver
         },
       ]),
     } as never);
+    vi.spyOn(Corridor, 'find').mockReturnValueOnce({
+      session: vi.fn().mockResolvedValue([corridorDoc]),
+    } as never);
+    vi.spyOn(Trip, 'find').mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        session: vi.fn().mockResolvedValue([]),
+      }),
+    } as never);
 
     await expect(
       submitDriverSlotCommitment({
         driverUserId: String(driverUserId),
         slotId: String(slot2Id),
       })
-    ).rejects.toThrow(/Conflicting slot commitment/i);
+    ).rejects.toThrow(/Conflicts with your committed/i);
 
     // 6. Reject withdrawal after cutoff deadline passes
     const expiredSlot = { ...slot1Doc, cutoffAt: new Date(Date.now() - 1000) };
@@ -535,6 +550,7 @@ describe('MC-045 to MC-050: Corridor Lifecycle, Slot Templates, Filters & Driver
       driverProfileId: Types.ObjectId;
       vehicleId: Types.ObjectId;
       slotNumber: number;
+      departureDate: Date;
       selectedPickupTime: string;
       selectedReturnTime: string;
       status: string;
@@ -548,6 +564,7 @@ describe('MC-045 to MC-050: Corridor Lifecycle, Slot Templates, Filters & Driver
       driverProfileId: profile1Id,
       vehicleId: vehicle1Id,
       slotNumber: 1,
+      departureDate: new Date('2026-12-01'),
       selectedPickupTime: '09:00',
       selectedReturnTime: '14:00',
       status: 'COMMITTED',

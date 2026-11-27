@@ -1,76 +1,29 @@
-import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Truck } from 'lucide-react';
-import { z } from 'zod';
-import { fetchDriverProfile, upsertDriverProfile } from '../../api/client';
+import { useQuery } from '@tanstack/react-query';
+import { Lock, Truck, UserCheck } from 'lucide-react';
+import { fetchDriverProfile } from '../../api/client';
 import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 import { ErrorState, LoadingState } from '../../components/ui/StateViews';
 import { useAuthStore } from '../../stores/authStore';
 
-const driverSchema = z.object({
-  name: z.string().trim().min(2, 'Name is required'),
-  phone: z.string().trim().min(8, 'Phone number is required'),
-  availabilityStatus: z.enum(['AVAILABLE', 'ON_TRIP', 'OFFLINE']),
-  fleetTier: z.enum(['TIER_1', 'TIER_2', 'TIER_3']),
-  licenseNumber: z.string().trim().optional(),
-  homeBase: z.string().trim().optional(),
-});
+const TIER_LABELS: Record<string, string> = {
+  TIER_1: 'Tier 1 (Contract Driver)',
+  TIER_2: 'Tier 2 (Marketplace)',
+  TIER_3: 'Tier 3 (Backhaul)',
+};
 
-type DriverFormValues = z.infer<typeof driverSchema>;
+const AVAILABILITY_VARIANTS: Record<string, 'success' | 'info' | 'neutral'> = {
+  AVAILABLE: 'success',
+  ON_TRIP: 'info',
+  OFFLINE: 'neutral',
+};
 
 export function DriverProfilePage() {
   const { user } = useAuthStore();
-  const queryClient = useQueryClient();
-  const [savedNotice, setSavedNotice] = useState(false);
 
   const profileQuery = useQuery({
     queryKey: ['driver-profile'],
     queryFn: fetchDriverProfile,
-  });
-
-  const profile = profileQuery.data?.driverProfile ?? null;
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-  } = useForm<DriverFormValues>({
-    resolver: zodResolver(driverSchema),
-    defaultValues: {
-      name: user?.name ?? '',
-      phone: user?.phone ?? '',
-      availabilityStatus: 'AVAILABLE',
-      fleetTier: 'TIER_1',
-      licenseNumber: '',
-      homeBase: '',
-    },
-  });
-
-  useEffect(() => {
-    if (profile) {
-      reset({
-        name: profile.name,
-        phone: profile.phone,
-        availabilityStatus: profile.availabilityStatus,
-        fleetTier: profile.fleetTier,
-        licenseNumber: profile.licenseNumber ?? '',
-        homeBase: profile.homeBase ?? '',
-      });
-    }
-  }, [profile, reset]);
-
-  const mutation = useMutation({
-    mutationFn: upsertDriverProfile,
-    onSuccess: (res) => {
-      queryClient.setQueryData(['driver-profile'], res);
-      setSavedNotice(true);
-      setTimeout(() => setSavedNotice(false), 3000);
-    },
   });
 
   if (profileQuery.isLoading) {
@@ -87,53 +40,50 @@ export function DriverProfilePage() {
     );
   }
 
-  const assignedVehicle = profile?.vehicleId;
+  const profile = profileQuery.data?.driverProfile ?? null;
+  const registeredVehicle = profile?.vehicleId ?? null;
+  const fleetTier = profile?.fleetTier ?? 'TIER_2';
+  const availability = profile?.availabilityStatus ?? 'AVAILABLE';
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Driver Profile</h1>
-          <p className="text-xs text-slate-500">Availability & Fleet Tier details</p>
+          <p className="text-xs text-slate-500">Read-only driver &amp; registered vehicle record</p>
         </div>
-        <Badge variant="info">{profile?.fleetTier ?? 'TIER_2'}</Badge>
+        <Badge variant="info">{TIER_LABELS[fleetTier] ?? fleetTier}</Badge>
       </div>
 
-      {savedNotice ? (
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-          <CheckCircle2 className="h-4 w-4" />
-          Driver profile updated.
-        </div>
-      ) : null}
-
-      {assignedVehicle ? (
+      {registeredVehicle ? (
         <Card>
           <CardHeader className="flex items-center justify-between py-3">
             <div className="flex items-center gap-2">
               <Truck className="h-4 w-4 text-emerald-700" />
               <span className="text-sm font-semibold text-slate-900">
-                Assigned Vehicle: {assignedVehicle.registrationNumber}
+                {fleetTier === 'TIER_1' ? 'Driver-Owned Vehicle' : 'Registered Vehicle'}:{' '}
+                {registeredVehicle.registrationNumber}
               </span>
             </div>
-            <Badge variant="success">{assignedVehicle.tier}</Badge>
+            <Badge variant="success">{registeredVehicle.tier}</Badge>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-2 text-xs text-slate-600">
             <div>
               <span className="text-slate-400">Class:</span>{' '}
-              <strong className="text-slate-800">{assignedVehicle.vehicleClass}</strong>
+              <strong className="text-slate-800">{registeredVehicle.vehicleClass}</strong>
             </div>
             <div>
-              <span className="text-slate-400">Payload:</span>{' '}
+              <span className="text-slate-400">Payload / Volume:</span>{' '}
               <strong className="text-slate-800">
-                {assignedVehicle.maxWeightKg} kg / {assignedVehicle.maxVolumeCbm} m³
+                {registeredVehicle.maxWeightKg} kg / {registeredVehicle.maxVolumeCbm} m³
               </strong>
             </div>
             <div className="col-span-2">
-              <span className="text-slate-400">Bed (L×W×H cm):</span>{' '}
+              <span className="text-slate-400">Bed Dimensions (L×W×H cm):</span>{' '}
               <strong className="text-slate-800">
-                {assignedVehicle.bedDimensionsCm.length} ×{' '}
-                {assignedVehicle.bedDimensionsCm.width} ×{' '}
-                {assignedVehicle.bedDimensionsCm.height}
+                {registeredVehicle.bedDimensionsCm.length} ×{' '}
+                {registeredVehicle.bedDimensionsCm.width} ×{' '}
+                {registeredVehicle.bedDimensionsCm.height}
               </strong>
             </div>
           </CardContent>
@@ -141,96 +91,74 @@ export function DriverProfilePage() {
       ) : null}
 
       <Card>
-        <CardContent>
-          <form
-            onSubmit={handleSubmit((vals) => mutation.mutate(vals))}
-            className="space-y-3"
-          >
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                Driver Name *
-              </label>
-              <input
-                {...register('name')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              {errors.name ? (
-                <p className="mt-1 text-xs text-rose-600">{errors.name.message}</p>
-              ) : null}
+        <CardHeader className="flex items-center justify-between border-b border-slate-100 py-3">
+          <div className="flex items-center gap-2">
+            <UserCheck className="h-4 w-4 text-slate-700" />
+            <h2 className="text-sm font-semibold text-slate-900">Driver Details</h2>
+          </div>
+          <Badge variant="neutral">
+            <Lock className="mr-1 inline h-3 w-3" />
+            Read-Only
+          </Badge>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-4 text-xs">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+              <p className="text-[11px] font-medium text-slate-500">Driver Name</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                {profile?.name ?? user?.name ?? '—'}
+              </p>
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                Phone *
-              </label>
-              <input
-                {...register('phone')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              {errors.phone ? (
-                <p className="mt-1 text-xs text-rose-600">{errors.phone.message}</p>
-              ) : null}
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+              <p className="text-[11px] font-medium text-slate-500">Email</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                {user?.email ?? '—'}
+              </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">
-                  Availability
-                </label>
-                <select
-                  {...register('availabilityStatus')}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                >
-                  <option value="AVAILABLE">Available</option>
-                  <option value="ON_TRIP">On Trip</option>
-                  <option value="OFFLINE">Offline</option>
-                </select>
-              </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+              <p className="text-[11px] font-medium text-slate-500">Phone</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                {profile?.phone ?? user?.phone ?? '—'}
+              </p>
+            </div>
 
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">
-                  Fleet Tier
-                </label>
-                <select
-                  {...register('fleetTier')}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                >
-                  <option value="TIER_1">Tier 1 (Attached)</option>
-                  <option value="TIER_2">Tier 2 (Marketplace)</option>
-                  <option value="TIER_3">Tier 3 (Backhaul)</option>
-                </select>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+              <p className="text-[11px] font-medium text-slate-500">Availability Status</p>
+              <div className="mt-1">
+                <Badge variant={AVAILABILITY_VARIANTS[availability] ?? 'neutral'}>
+                  {availability}
+                </Badge>
               </div>
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                License Number
-              </label>
-              <input
-                {...register('licenseNumber')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase"
-              />
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+              <p className="text-[11px] font-medium text-slate-500">Fleet Tier</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                {TIER_LABELS[fleetTier] ?? fleetTier}
+              </p>
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                Home Base Hub
-              </label>
-              <input
-                {...register('homeBase')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
+              <p className="text-[11px] font-medium text-slate-500">License Number</p>
+              <p className="mt-0.5 font-mono text-sm font-semibold uppercase text-slate-900">
+                {profile?.licenseNumber || '—'}
+              </p>
             </div>
 
-            <Button
-              type="submit"
-              variant="primary"
-              className="w-full"
-              disabled={mutation.isPending}
-            >
-              {mutation.isPending ? 'Saving...' : 'Save Driver Profile'}
-            </Button>
-          </form>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 sm:col-span-2">
+              <p className="text-[11px] font-medium text-slate-500">Home Base Hub</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                {profile?.homeBase || '—'}
+              </p>
+            </div>
+          </div>
+
+          <p className="rounded-lg border border-slate-200 bg-slate-100/80 px-3 py-2 text-[11px] text-slate-600">
+            Driver profile details are read-only here. Contact the Platform Owner if your registration,
+            license, or vehicle specifications need an administrative update.
+          </p>
         </CardContent>
       </Card>
     </div>

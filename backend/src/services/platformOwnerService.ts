@@ -987,6 +987,8 @@ export interface CreateCorridorInput {
   stops: CorridorStopInput[];
   operatingDays: Weekday[];
   slotSchedules: CorridorSlotSchedule[];
+  estimatedOutboundDurationMin?: number;
+  turnaroundBufferMin?: number;
   guaranteedCeilingPaisePerKg: number;
   baseRatePaisePerKg: number;
   viabilityThresholdPct?: number;
@@ -1000,6 +1002,8 @@ export interface UpdateCorridorInput {
   stops?: CorridorStopInput[];
   operatingDays?: Weekday[];
   slotSchedules?: CorridorSlotSchedule[];
+  estimatedOutboundDurationMin?: number;
+  turnaroundBufferMin?: number;
   guaranteedCeilingPaisePerKg?: number;
   baseRatePaisePerKg?: number;
   viabilityThresholdPct?: number;
@@ -1307,6 +1311,8 @@ export async function createCorridorForOwner(params: {
           stops: normalizedStops,
           operatingDays: Array.from(new Set(input.operatingDays)),
           slotSchedules: normalizedSchedules,
+          estimatedOutboundDurationMin: input.estimatedOutboundDurationMin ?? 120,
+          turnaroundBufferMin: input.turnaroundBufferMin ?? 30,
           isEstablishedRoute: true,
           guaranteedCeilingPaisePerKg: input.guaranteedCeilingPaisePerKg,
           baseRatePaisePerKg: input.baseRatePaisePerKg,
@@ -1358,6 +1364,12 @@ export async function updateCorridorForOwner(params: {
       corridor.operatingDays = Array.from(new Set(input.operatingDays));
     }
     if (normalizedSchedules) corridor.slotSchedules = normalizedSchedules;
+    if (input.estimatedOutboundDurationMin !== undefined) {
+      corridor.estimatedOutboundDurationMin = input.estimatedOutboundDurationMin;
+    }
+    if (input.turnaroundBufferMin !== undefined) {
+      corridor.turnaroundBufferMin = input.turnaroundBufferMin;
+    }
     if (input.guaranteedCeilingPaisePerKg !== undefined) {
       corridor.guaranteedCeilingPaisePerKg = input.guaranteedCeilingPaisePerKg;
     }

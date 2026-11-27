@@ -11,8 +11,9 @@ import { callRouteOptimizer } from './optimizerClient.js';
 export async function optimizeAndPlanTripRoute(params: {
   tripId: string;
   actorUserId?: string;
+  replanReason?: string;
 }) {
-  const { tripId } = params;
+  const { tripId, replanReason } = params;
   if (!isValidObjectId(tripId)) {
     throw new HttpError(400, 'Invalid trip ID', 'VALIDATION_ERROR');
   }
@@ -97,8 +98,24 @@ export async function optimizeAndPlanTripRoute(params: {
     time_limit_seconds: 5,
   });
 
+  const previousPlan = trip.routePlan;
+  const nextVersion = (previousPlan?.routeVersion ?? (previousPlan ? 1 : 0)) + 1;
+  const nextHistory = [...(previousPlan?.routeHistory ?? [])];
+  if (previousPlan && previousPlan.orderedStops?.length > 0) {
+    nextHistory.push({
+      version: previousPlan.routeVersion ?? 1,
+      optimizationStatus: previousPlan.optimizationStatus,
+      totalDistanceMeters: previousPlan.totalDistanceMeters,
+      estimatedDurationSeconds: previousPlan.estimatedDurationSeconds,
+      orderedStops: previousPlan.orderedStops,
+      reason: replanReason ?? 'Superseded by backend replanning',
+      supersededAt: new Date(),
+    });
+  }
+
   if (optResult.status !== 'OPTIMAL') {
     trip.routePlan = {
+      routeVersion: nextVersion,
       optimizationStatus: optResult.status,
       provider: 'OR_TOOLS',
       matrixProvider: matrix.provider,
@@ -106,12 +123,14 @@ export async function optimizeAndPlanTripRoute(params: {
       estimatedDurationSeconds: 0,
       orderedStops: [],
       failureReason: optResult.reason ?? 'Optimization did not return a valid solution.',
+      routeHistory: nextHistory,
     };
     await trip.save();
     return { trip, optimized: false, routePlan: trip.routePlan };
   }
 
   trip.routePlan = {
+    routeVersion: nextVersion,
     optimizationStatus: 'OPTIMAL',
     provider: 'OR_TOOLS',
     matrixProvider: matrix.provider,
@@ -126,6 +145,7 @@ export async function optimizeAndPlanTripRoute(params: {
       shipmentIds: s.shipment_ids,
     })),
     optimizedAt: new Date(),
+    routeHistory: nextHistory,
   };
 
   trip.stopsSummary = optResult.ordered_stops.map((s) => ({
@@ -140,7 +160,11 @@ export async function optimizeAndPlanTripRoute(params: {
       stopCode: s.stop_code,
     })),
     shipments,
-    bedDimensionsCm: vehicle.bedDimensionsCm,
+    bedDimensionsCm: trip.vehicleSnapshot?.bedDimensionsCm ?? vehicle.bedDimensionsCm,
+    vehicleLimits: {
+      maxWeightKg: trip.vehicleSnapshot?.maxWeightKg ?? vehicle.maxWeightKg,
+      maxVolumeCbm: trip.vehicleSnapshot?.maxVolumeCbm ?? vehicle.maxVolumeCbm,
+    },
     existingManualOverrides: trip.loadingPlan?.manualOverrides ?? [],
   });
 

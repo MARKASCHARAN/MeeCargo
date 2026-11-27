@@ -26,7 +26,16 @@ export function resolveSlotNumber(slot: Pick<ISlot, 'slotNumber' | 'slotCode'>):
 
 export function resolveSlotTemplateForSlot(
   corridor: Pick<ICorridor, 'slotSchedules'>,
-  slot: Pick<ISlot, 'slotNumber' | 'slotCode' | 'returnTimeOptions' | 'returnTimeLocked' | 'lockedReturnTime' | 'plannedDepartureAt' | 'estimatedArrivalStartAt'>
+  slot: Pick<
+    ISlot,
+    | 'slotNumber'
+    | 'slotCode'
+    | 'returnTimeOptions'
+    | 'returnTimeLocked'
+    | 'lockedReturnTime'
+    | 'plannedDepartureAt'
+    | 'estimatedArrivalStartAt'
+  >
 ): CorridorSlotSchedule | null {
   const slotNum = resolveSlotNumber(slot);
   if (slotNum) {
@@ -43,12 +52,233 @@ export function combineDateAndTime(baseDate: Date, timeHhMm: string): Date {
   return out;
 }
 
-function isSameCalendarDay(a: Date, b: Date): boolean {
+export function isSameCalendarDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
   );
+}
+
+/**
+ * Computes conservative operational interval [startAt, endAt] + turnaround buffer bounds.
+ * Handles cross-midnight schedules and minimum duration fallback when end <= start.
+ */
+export function computeOperationalInterval(params: {
+  departureDate: Date;
+  pickupTime: string;
+  returnTime?: string;
+  turnaroundBufferMin?: number;
+  conservativeMinDurationMin?: number;
+}) {
+  const {
+    departureDate,
+    pickupTime,
+    returnTime,
+    turnaroundBufferMin = 30,
+    conservativeMinDurationMin = 120,
+  } = params;
+
+  const startAt = combineDateAndTime(departureDate, pickupTime);
+  let endAt: Date;
+
+  if (returnTime && /^\d{2}:\d{2}$/.test(returnTime)) {
+    endAt = combineDateAndTime(departureDate, returnTime);
+    if (endAt <= startAt) {
+      endAt = new Date(endAt.getTime() + 24 * 60 * 60 * 1000);
+    }
+  } else {
+    // Missing duration/return info: conservative fallback rule
+    endAt = new Date(startAt.getTime() + conservativeMinDurationMin * 60_000);
+  }
+
+  const bufferMs = Math.max(0, turnaroundBufferMin) * 60_000;
+  return {
+    startAt,
+    endAt,
+    bufferedStartAt: new Date(startAt.getTime() - bufferMs),
+    bufferedEndAt: new Date(endAt.getTime() + bufferMs),
+    bufferMin: turnaroundBufferMin,
+  };
+}
+
+export function intervalsOverlap(
+  aStart: Date,
+  aEnd: Date,
+  bStart: Date,
+  bEnd: Date
+): boolean {
+  return aStart.getTime() < bEnd.getTime() && aEnd.getTime() > bStart.getTime();
+}
+
+export interface WindowConflictDetail {
+  sourceType: 'COMMITMENT' | 'TRIP';
+  slotId?: string;
+  slotNumber?: 1 | 2;
+  corridorCode?: string;
+  tripCode?: string;
+  departureDate: Date;
+  pickupTime: string;
+  returnTime: string;
+  turnaroundBufferMin: number;
+}
+
+export function findWindowConflictDetailFromRecords(params: {
+  candidateDepartureDate: Date;
+  candidatePickupTime: string;
+  candidateReturnTime: string;
+  turnaroundBufferMin: number;
+  conservativeMinDurationMin: number;
+  excludeSlotId?: string;
+  otherCommitments: Array<{
+    slotId: unknown;
+    corridorCode?: string;
+    slotNumber: 1 | 2;
+    departureDate: Date;
+    selectedPickupTime: string;
+    selectedReturnTime: string;
+    turnaroundBufferMin?: number;
+  }>;
+  activeTrips: Array<{
+    _id: unknown;
+    tripCode: string;
+    plannedDepartureAt: Date;
+    estimatedEndAt: Date;
+  }>;
+}): WindowConflictDetail | null {
+  const {
+    candidateDepartureDate,
+    candidatePickupTime,
+    candidateReturnTime,
+    turnaroundBufferMin,
+    conservativeMinDurationMin,
+    excludeSlotId,
+    otherCommitments,
+    activeTrips,
+  } = params;
+
+  const candidate = computeOperationalInterval({
+    departureDate: candidateDepartureDate,
+    pickupTime: candidatePickupTime,
+    returnTime: candidateReturnTime,
+    turnaroundBufferMin,
+    conservativeMinDurationMin,
+  });
+
+  for (const other of otherCommitments) {
+    if (excludeSlotId && String(other.slotId) === String(excludeSlotId)) {
+      continue;
+    }
+    const effectiveBuffer = Math.max(
+      turnaroundBufferMin,
+      other.turnaroundBufferMin ?? turnaroundBufferMin
+    );
+    const existing = computeOperationalInterval({
+      departureDate: new Date(other.departureDate),
+      pickupTime: other.selectedPickupTime,
+      returnTime: other.selectedReturnTime,
+      turnaroundBufferMin: other.turnaroundBufferMin ?? turnaroundBufferMin,
+      conservativeMinDurationMin,
+    });
+
+    if (
+      intervalsOverlap(
+        candidate.bufferedStartAt,
+        candidate.bufferedEndAt,
+        existing.bufferedStartAt,
+        existing.bufferedEndAt
+      )
+    ) {
+      return {
+        sourceType: 'COMMITMENT',
+        slotId: String(other.slotId),
+        slotNumber: other.slotNumber,
+        corridorCode: other.corridorCode,
+        departureDate: new Date(other.departureDate),
+        pickupTime: other.selectedPickupTime,
+        returnTime: other.selectedReturnTime,
+        turnaroundBufferMin: effectiveBuffer,
+      };
+    }
+  }
+
+  for (const trip of activeTrips) {
+    const tripStart = new Date(trip.plannedDepartureAt);
+    const tripEnd = new Date(trip.estimatedEndAt);
+    const bufferMs = Math.max(0, turnaroundBufferMin) * 60_000;
+    const tripBufferedStart = new Date(tripStart.getTime() - bufferMs);
+    const tripBufferedEnd = new Date(tripEnd.getTime() + bufferMs);
+
+    if (
+      intervalsOverlap(
+        candidate.bufferedStartAt,
+        candidate.bufferedEndAt,
+        tripBufferedStart,
+        tripBufferedEnd
+      )
+    ) {
+      return {
+        sourceType: 'TRIP',
+        tripCode: trip.tripCode,
+        departureDate: tripStart,
+        pickupTime: tripStart.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }),
+        returnTime: tripEnd.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }),
+        turnaroundBufferMin: Math.max(0, turnaroundBufferMin),
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Checks if a candidate driver commitment window overlaps ANY active commitment across all
+ * corridors or any active/assigned trip, factoring in configured turnaround buffers and cross-midnight spans.
+ */
+export function evaluateWindowConflictsFromRecords(params: {
+  candidateDepartureDate: Date;
+  candidatePickupTime: string;
+  candidateReturnTime: string;
+  turnaroundBufferMin: number;
+  conservativeMinDurationMin: number;
+  excludeSlotId?: string;
+  otherCommitments: Array<{
+    slotId: unknown;
+    corridorCode?: string;
+    slotNumber: 1 | 2;
+    departureDate: Date;
+    selectedPickupTime: string;
+    selectedReturnTime: string;
+    turnaroundBufferMin?: number;
+  }>;
+  activeTrips: Array<{
+    _id: unknown;
+    tripCode: string;
+    plannedDepartureAt: Date;
+    estimatedEndAt: Date;
+  }>;
+}): string | null {
+  const detail = findWindowConflictDetailFromRecords(params);
+  if (!detail) return null;
+
+  if (detail.sourceType === 'COMMITMENT') {
+    const dayLabel = detail.departureDate.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+    });
+    const corridorPrefix = detail.corridorCode ? `${detail.corridorCode} ` : '';
+    return `Conflicts with your committed ${corridorPrefix}Slot ${detail.slotNumber} (${detail.pickupTime}–${detail.returnTime}) on ${dayLabel} (including ${detail.turnaroundBufferMin} min turnaround buffer).`;
+  }
+
+  return `Conflicts with assigned trip ${detail.tripCode} (${detail.pickupTime}–${detail.returnTime}).`;
 }
 
 /**
@@ -116,7 +346,7 @@ export async function notifyEligibleTier1DriversForSlot(params: {
 
 /**
  * Lists eligible open pooling windows for an authenticated Tier 1 contract driver,
- * together with existing slot participation commitments.
+ * computing per-slot and per-return-option schedule conflict status across all corridors & trips.
  */
 export async function listOpenPoolingSlotsForDriver(params: {
   driverUserId: string;
@@ -189,9 +419,7 @@ export async function listOpenPoolingSlotsForDriver(params: {
   }
 
   const eligibleCorridorIds = Array.from(
-    new Set(
-      activeContracts.flatMap((c) => c.eligibleCorridorIds.map((cid) => String(cid)))
-    )
+    new Set(activeContracts.flatMap((c) => c.eligibleCorridorIds.map((cid) => String(cid))))
   ).map((id) => new Types.ObjectId(id));
 
   if (eligibleCorridorIds.length === 0) {
@@ -218,18 +446,62 @@ export async function listOpenPoolingSlotsForDriver(params: {
   const pools = await Pool.find({ slotId: { $in: openSlotIds } });
   const poolBySlotId = new Map(pools.map((p) => [String(p.slotId), p]));
 
-  const slotCommitments = await DriverSlotCommitment.find({
+  // Fetch ALL active commitments (across ALL corridors) + active trips for accurate overlap calculation
+  const allActiveCommitments = await DriverSlotCommitment.find({
+    driverUserId,
+    status: { $in: ['COMMITTED', 'LOCKED', 'ALLOCATED'] },
+  });
+  const commitmentCorridorIds = Array.from(
+    new Set(allActiveCommitments.map((c) => String(c.corridorId)))
+  );
+  const commitmentCorridors =
+    commitmentCorridorIds.length > 0
+      ? await Corridor.find({ _id: { $in: commitmentCorridorIds } })
+      : [];
+  const allCorridorMap = new Map([
+    ...Array.from(corridorById.entries()),
+    ...commitmentCorridors.map((c) => [String(c._id), c] as const),
+  ]);
+
+  const activeTrips = await Trip.find({
+    driverId: profile.userId,
+    status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'IN_PROGRESS', 'PAUSED'] },
+  }).select('_id tripCode plannedDepartureAt estimatedEndAt');
+
+  const commitmentBySlotId = new Map(
+    allActiveCommitments
+      .filter((c) => openSlotIds.some((id) => String(id) === String(c.slotId)))
+      .map((c) => [String(c.slotId), c])
+  );
+  // Also include withdrawn/invalidated commitments for current open slots to show latest state
+  const openSlotAllCommitments = await DriverSlotCommitment.find({
     slotId: { $in: openSlotIds },
     driverUserId,
   });
-  const commitmentBySlotId = new Map(slotCommitments.map((c) => [String(c.slotId), c]));
+  for (const c of openSlotAllCommitments) {
+    if (!commitmentBySlotId.has(String(c.slotId))) {
+      commitmentBySlotId.set(String(c.slotId), c);
+    }
+  }
+
+  const otherCommitmentInputs = allActiveCommitments.map((c) => {
+    const cor = allCorridorMap.get(String(c.corridorId));
+    return {
+      slotId: c.slotId,
+      corridorCode: cor?.code,
+      slotNumber: c.slotNumber,
+      departureDate: c.departureDate,
+      selectedPickupTime: c.selectedPickupTime,
+      selectedReturnTime: c.selectedReturnTime,
+      turnaroundBufferMin: cor?.turnaroundBufferMin ?? 30,
+    };
+  });
 
   const items = openSlots
     .map((slot) => {
       const corridor = corridorById.get(String(slot.corridorId));
       if (!corridor) return null;
 
-      // Verify at least one active contract covers this exact slot departureDate
       const slotMs = new Date(slot.departureDate).getTime();
       const hasValidContractForDate = activeContracts.some(
         (c) =>
@@ -240,17 +512,71 @@ export async function listOpenPoolingSlotsForDriver(params: {
       if (!hasValidContractForDate) return null;
 
       const template = resolveSlotTemplateForSlot(corridor, slot);
+      if (!template) return null;
+
       const pool = poolBySlotId.get(String(slot._id));
       const commitment = commitmentBySlotId.get(String(slot._id)) ?? null;
+      const isCurrentlyCommitted =
+        commitment?.status === 'COMMITTED' || commitment?.status === 'LOCKED';
+
+      const returnOptions =
+        slot.returnTimeOptions && slot.returnTimeOptions.length > 0
+          ? slot.returnTimeOptions
+          : template.returnTimeOptions;
+      const isLockedReturn = Boolean(slot.returnTimeLocked ?? template.returnTimeLocked);
+      const lockedReturn = slot.lockedReturnTime ?? template.lockedReturnTime;
+
+      const turnaroundBufferMin = corridor.turnaroundBufferMin ?? 30;
+      const conservativeMinDurationMin = corridor.estimatedOutboundDurationMin ?? 120;
+
+      // Evaluate conflict status for each return option individually
+      const optionConflicts: Record<string, string | null> = {};
+      const optionDetails: Record<string, WindowConflictDetail | null> = {};
+      const optionsToCheck = isLockedReturn && lockedReturn ? [lockedReturn] : returnOptions;
+      for (const opt of optionsToCheck) {
+        const sharedParams = {
+          candidateDepartureDate: new Date(slot.departureDate),
+          candidatePickupTime: template.outboundPickupTime,
+          candidateReturnTime: opt,
+          turnaroundBufferMin,
+          conservativeMinDurationMin,
+          excludeSlotId: String(slot._id),
+          otherCommitments: otherCommitmentInputs,
+          activeTrips,
+        };
+        optionConflicts[opt] = evaluateWindowConflictsFromRecords(sharedParams);
+        optionDetails[opt] = findWindowConflictDetailFromRecords(sharedParams);
+      }
+
+      const conflictMessages = Object.values(optionConflicts).filter(
+        (v): v is string => Boolean(v)
+      );
+      const hasAnyAvailableOption = optionsToCheck.some((opt) => !optionConflicts[opt]);
+      const conflictReason = hasAnyAvailableOption ? null : conflictMessages[0] ?? 'Schedule conflict';
+      const firstConflictDetail =
+        Object.values(optionDetails).find((d): d is WindowConflictDetail => Boolean(d)) ?? null;
+      const conflictDetail = hasAnyAvailableOption ? null : firstConflictDetail;
+
+      const availabilityState = isCurrentlyCommitted
+        ? 'COMMITTED'
+        : conflictReason
+          ? 'UNAVAILABLE_SCHEDULE_CONFLICT'
+          : 'OPEN_FOR_SELECTION';
 
       return {
         slotId: String(slot._id),
         slotCode: slot.slotCode,
-        slotNumber: resolveSlotNumber(slot) ?? template?.slotNumber ?? 1,
+        slotNumber: resolveSlotNumber(slot) ?? template.slotNumber,
+        slotStatus: slot.status,
         label: slot.label,
         departureDate: slot.departureDate,
         cutoffAt: slot.cutoffAt,
         plannedDepartureAt: slot.plannedDepartureAt,
+        availabilityState,
+        conflictReason,
+        conflictDetail,
+        optionConflicts,
+        turnaroundBufferMin,
         corridor: {
           _id: String(corridor._id),
           code: corridor.code,
@@ -258,14 +584,17 @@ export async function listOpenPoolingSlotsForDriver(params: {
           stops: corridor.stops,
         },
         template: {
-          outboundPickupTime: template?.outboundPickupTime ?? '09:00',
-          returnTimeOptions:
-            slot.returnTimeOptions && slot.returnTimeOptions.length > 0
-              ? slot.returnTimeOptions
-              : template?.returnTimeOptions ?? [],
-          defaultReturnTime: template?.defaultReturnTime ?? '',
-          returnTimeLocked: Boolean(slot.returnTimeLocked ?? template?.returnTimeLocked),
-          lockedReturnTime: slot.lockedReturnTime ?? template?.lockedReturnTime,
+          outboundPickupTime: template.outboundPickupTime,
+          returnTimeOptions: returnOptions,
+          defaultReturnTime: template.defaultReturnTime,
+          returnTimeLocked: isLockedReturn,
+          lockedReturnTime: lockedReturn,
+        },
+        capacity: {
+          capacityWeightKg: slot.capacityWeightKg,
+          capacityVolumeCbm: slot.capacityVolumeCbm,
+          reservedWeightKg: pool?.reservedWeightKg ?? slot.reservedWeightKg ?? 0,
+          reservedVolumeCbm: pool?.reservedVolumeCbm ?? slot.reservedVolumeCbm ?? 0,
         },
         poolSummary: pool
           ? {
@@ -298,7 +627,7 @@ export async function listOpenPoolingSlotsForDriver(params: {
 
 /**
  * Allows an eligible active Tier 1 driver to submit or update slot availability commitment
- * before the pooling window cutoff deadline.
+ * before the pooling window cutoff deadline, enforcing cross-corridor interval overlap & trip checks.
  */
 export async function submitDriverSlotCommitment(params: {
   driverUserId: string;
@@ -439,52 +768,57 @@ export async function submitDriverSlotCommitment(params: {
       finalReturnTime = trimmed;
     }
 
-    const windowStart = combineDateAndTime(slot.departureDate, pickupTime);
-    let windowEnd = combineDateAndTime(slot.departureDate, finalReturnTime);
-    if (windowEnd <= windowStart) {
-      windowEnd = new Date(windowEnd.getTime() + 24 * 60 * 60 * 1000);
-    }
+    const checkConflicts = async () => {
+      const existingOtherCommitments = await DriverSlotCommitment.find({
+        driverUserId,
+        status: { $in: ['COMMITTED', 'LOCKED', 'ALLOCATED'] },
+        slotId: { $ne: slot._id },
+      }).session(session);
 
-    // Prevent conflicting same-day commitments across overlapping slots
-    const existingOtherCommitments = await DriverSlotCommitment.find({
-      driverUserId,
-      status: 'COMMITTED',
-      slotId: { $ne: slot._id },
-    }).session(session);
-
-    for (const other of existingOtherCommitments) {
-      if (!isSameCalendarDay(new Date(other.departureDate), slotDate)) {
-        continue;
-      }
-      const otherStart = combineDateAndTime(other.departureDate, other.selectedPickupTime);
-      let otherEnd = combineDateAndTime(other.departureDate, other.selectedReturnTime);
-      if (otherEnd <= otherStart) {
-        otherEnd = new Date(otherEnd.getTime() + 24 * 60 * 60 * 1000);
-      }
-      if (windowStart < otherEnd && windowEnd > otherStart) {
-        throw new HttpError(
-          409,
-          `Conflicting slot commitment on ${slotDate.toISOString().slice(0, 10)}: overlaps existing commitment (${other.selectedPickupTime}–${other.selectedReturnTime}).`,
-          'CONFLICTING_SLOT_COMMITMENT'
-        );
-      }
-    }
-
-    // Check overlapping already-assigned trips
-    const overlappingTrip = await Trip.findOne({
-      driverId: profile.userId,
-      status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'IN_PROGRESS', 'PAUSED'] },
-      plannedDepartureAt: { $lt: windowEnd },
-      estimatedEndAt: { $gt: windowStart },
-    }).session(session);
-
-    if (overlappingTrip) {
-      throw new HttpError(
-        409,
-        `You already have an active trip (${overlappingTrip.tripCode}) overlapping this time window.`,
-        'CONFLICTING_TRIP_COMMITMENT'
+      const otherCorridorIds = Array.from(
+        new Set(existingOtherCommitments.map((c) => String(c.corridorId)))
       );
-    }
+      const otherCorridors =
+        otherCorridorIds.length > 0
+          ? await Corridor.find({ _id: { $in: otherCorridorIds } }).session(session)
+          : [];
+      const otherCorridorMap = new Map(otherCorridors.map((c) => [String(c._id), c]));
+
+      const activeTrips = await Trip.find({
+        driverId: profile.userId,
+        status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'IN_PROGRESS', 'PAUSED'] },
+      })
+        .select('_id tripCode plannedDepartureAt estimatedEndAt')
+        .session(session);
+
+      const conflictMessage = evaluateWindowConflictsFromRecords({
+        candidateDepartureDate: slotDate,
+        candidatePickupTime: pickupTime,
+        candidateReturnTime: finalReturnTime,
+        turnaroundBufferMin: corridor.turnaroundBufferMin ?? 30,
+        conservativeMinDurationMin: corridor.estimatedOutboundDurationMin ?? 120,
+        excludeSlotId: String(slot._id),
+        otherCommitments: existingOtherCommitments.map((other) => {
+          const cor = otherCorridorMap.get(String(other.corridorId));
+          return {
+            slotId: other.slotId,
+            corridorCode: cor?.code,
+            slotNumber: other.slotNumber,
+            departureDate: other.departureDate,
+            selectedPickupTime: other.selectedPickupTime,
+            selectedReturnTime: other.selectedReturnTime,
+            turnaroundBufferMin: cor?.turnaroundBufferMin ?? corridor.turnaroundBufferMin ?? 30,
+          };
+        }),
+        activeTrips,
+      });
+
+      if (conflictMessage) {
+        throw new HttpError(409, conflictMessage, 'CONFLICTING_SLOT_COMMITMENT');
+      }
+    };
+
+    await checkConflicts();
 
     const pool = await Pool.findOne({ slotId: slot._id }).session(session);
 
@@ -512,6 +846,9 @@ export async function submitDriverSlotCommitment(params: {
       },
       { upsert: true, returnDocument: 'after', session: session ?? undefined }
     );
+
+    // Second conflict check inside transaction guards simultaneous concurrent submits
+    await checkConflicts();
 
     return { commitment };
   });
@@ -557,8 +894,8 @@ export async function withdrawDriverSlotCommitment(params: {
 }
 
 /**
- * Re-validates all COMMITTED Tier 1 driver commitments when a pooling window closes.
- * Invalidates commitments whose driver, vehicle, corridor, contract, or overlap status failed.
+ * Re-validates all COMMITTED Tier 1 driver commitments when a pooling window closes,
+ * locking valid commitments (COMMITTED -> LOCKED) and invalidating stale ones.
  */
 export async function validateCommitmentsAtWindowClose(params: {
   slot: ISlot;
@@ -572,7 +909,7 @@ export async function validateCommitmentsAtWindowClose(params: {
 
   const commitments = await DriverSlotCommitment.find({
     slotId: slot._id,
-    status: 'COMMITTED',
+    status: { $in: ['COMMITTED', 'LOCKED'] },
   }).session(session);
 
   const validCommitments: IDriverSlotCommitment[] = [];
@@ -583,6 +920,10 @@ export async function validateCommitmentsAtWindowClose(params: {
 
     if (!corridor.isActive) {
       reason = 'CORRIDOR_INACTIVE';
+    }
+
+    if (!reason && !isSameCalendarDay(new Date(commitment.departureDate), new Date(slot.departureDate))) {
+      reason = 'SERVICE_DATE_MISMATCH';
     }
 
     const profile = !reason
@@ -625,17 +966,19 @@ export async function validateCommitmentsAtWindowClose(params: {
     }
 
     if (!reason) {
-      const windowStart = combineDateAndTime(slot.departureDate, commitment.selectedPickupTime);
-      let windowEnd = combineDateAndTime(slot.departureDate, commitment.selectedReturnTime);
-      if (windowEnd <= windowStart) {
-        windowEnd = new Date(windowEnd.getTime() + 24 * 60 * 60 * 1000);
-      }
+      const interval = computeOperationalInterval({
+        departureDate: slot.departureDate,
+        pickupTime: commitment.selectedPickupTime,
+        returnTime: commitment.selectedReturnTime,
+        turnaroundBufferMin: corridor.turnaroundBufferMin ?? 30,
+        conservativeMinDurationMin: corridor.estimatedOutboundDurationMin ?? 120,
+      });
 
       const conflictingTrip = await Trip.findOne({
         driverId: commitment.driverUserId,
         status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'IN_PROGRESS', 'PAUSED'] },
-        plannedDepartureAt: { $lt: windowEnd },
-        estimatedEndAt: { $gt: windowStart },
+        plannedDepartureAt: { $lt: interval.bufferedEndAt },
+        estimatedEndAt: { $gt: interval.bufferedStartAt },
       }).session(session);
 
       if (conflictingTrip) {
@@ -649,6 +992,10 @@ export async function validateCommitmentsAtWindowClose(params: {
       await commitment.save({ session: session ?? undefined });
       invalidatedCount += 1;
     } else {
+      commitment.status = 'LOCKED';
+      commitment.lockedAt = commitment.lockedAt ?? new Date();
+      commitment.invalidationReason = undefined;
+      await commitment.save({ session: session ?? undefined });
       validCommitments.push(commitment);
     }
   }

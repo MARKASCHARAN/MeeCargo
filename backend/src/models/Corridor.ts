@@ -102,6 +102,8 @@ export interface ICorridor extends Document {
   stops: CorridorStop[];
   operatingDays: Weekday[];
   slotSchedules: CorridorSlotSchedule[];
+  estimatedOutboundDurationMin: number;
+  turnaroundBufferMin: number;
   isEstablishedRoute: boolean;
   guaranteedCeilingPaisePerKg: number;
   baseRatePaisePerKg: number;
@@ -161,6 +163,8 @@ const corridorSchema = new Schema<ICorridor>(
       default: () => DEFAULT_CORRIDOR_SLOT_SCHEDULES,
       required: true,
     },
+    estimatedOutboundDurationMin: { type: Number, default: 120, min: 30, max: 720 },
+    turnaroundBufferMin: { type: Number, default: 30, min: 0, max: 240 },
     isEstablishedRoute: { type: Boolean, default: true },
     guaranteedCeilingPaisePerKg: { type: Number, required: true, min: 1 },
     baseRatePaisePerKg: { type: Number, required: true, min: 1 },

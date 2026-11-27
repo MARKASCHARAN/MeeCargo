@@ -14,6 +14,7 @@ import { Payment } from '../models/Payment.js';
 import { PickupCollection } from '../models/PickupCollection.js';
 import { Pool } from '../models/Pool.js';
 import { PricingConfig } from '../models/PricingConfig.js';
+import { RefreshToken } from '../models/RefreshToken.js';
 import { RouteMatrixCache } from '../models/RouteMatrixCache.js';
 import { Shipment } from '../models/Shipment.js';
 import { Slot } from '../models/Slot.js';
@@ -23,6 +24,8 @@ import { TripLedger } from '../models/TripLedger.js';
 import { User, type IUser } from '../models/User.js';
 import { Vehicle } from '../models/Vehicle.js';
 import { calculateCargoMetrics } from '../services/cargoCalculator.js';
+import { evaluateBackhaulForTrip } from '../services/backhaulService.js';
+import { buildLifoLoadingPlan } from '../services/loadingPlanService.js';
 import {
   migrateToSinglePlatformOwner,
   provisionSinglePlatformOwner,
@@ -53,8 +56,19 @@ export async function resetDemoState(): Promise<void> {
     BackhaulRequest.deleteMany({}),
     DriverContract.deleteMany({}),
     DriverSlotCommitment.deleteMany({}),
+    BusinessProfile.deleteMany({}),
+    DriverProfile.deleteMany({}),
+    Vehicle.deleteMany({}),
+    Corridor.deleteMany({}),
+    PricingConfig.deleteMany({}),
+    RefreshToken.deleteMany({}),
+    User.deleteMany({}),
   ]);
   await Promise.all([
+    User.syncIndexes(),
+    Corridor.syncIndexes(),
+    Trip.syncIndexes(),
+    DriverSlotCommitment.syncIndexes(),
     Shipment.syncIndexes(),
     Payment.syncIndexes(),
     PickupCollection.syncIndexes(),
@@ -825,31 +839,119 @@ export async function seedDatabase(options: SeedOptions = {}) {
       { $set: { reservedWeightKg: totalMorningWt, reservedVolumeCbm: totalMorningVol } }
     );
 
-    const pmTrip = await Trip.create({
-      tripCode: `MC-TRIP-${datePrefix}-PM1`,
+    const todayPrefix = now.toISOString().slice(0, 10);
+    const todayDeparture = new Date(now);
+    todayDeparture.setHours(s1DepH, s1DepM, 0, 0);
+    const todayCutoff = new Date(todayDeparture.getTime() - 90 * 60 * 1000);
+    const todayReturn = new Date(now);
+    todayReturn.setHours(s1Ret1H, s1Ret1M, 0, 0);
+
+    const todaySlot1 = await Slot.findOneAndUpdate(
+      { slotCode: `GJ-VAD-AMD-01-${todayPrefix}-SLOT1` },
+      {
+        $setOnInsert: {
+          corridorId: corridor._id,
+          slotNumber: 1,
+          slotCode: `GJ-VAD-AMD-01-${todayPrefix}-SLOT1`,
+          label: sched1.label,
+          departureDate: now,
+          cutoffAt: todayCutoff,
+          plannedDepartureAt: todayDeparture,
+          estimatedArrivalStartAt: todayReturn,
+          estimatedArrivalEndAt: todayReturn,
+          returnTimeOptions: sched1.returnTimeOptions,
+          returnTimeLocked: false,
+          scheduleSnapshot: {
+            outboundPickupTime: sched1.outboundPickupTime,
+            returnTimeOptions: sched1.returnTimeOptions,
+            defaultReturnTime: sched1.defaultReturnTime,
+            returnTimeLocked: false,
+          },
+          capacityWeightKg: 2500,
+          capacityVolumeCbm: 12,
+          reservedWeightKg: cargo3.chargeableWeightKg,
+          reservedVolumeCbm: cargo3.totalVolumeCbm,
+          status: 'LOCKED',
+        },
+      },
+      { upsert: true, returnDocument: 'after', runValidators: true }
+    );
+
+    const todayCommitment = await DriverSlotCommitment.findOneAndUpdate(
+      { slotId: todaySlot1._id, driverUserId: driver1._id },
+      {
+        $setOnInsert: {
+          corridorId: corridor._id,
+          slotId: todaySlot1._id,
+          driverUserId: driver1._id,
+          driverProfileId: driver1Profile._id,
+          vehicleId: tier1Vehicle._id,
+          slotNumber: 1,
+          departureDate: todaySlot1.departureDate,
+          selectedPickupTime: sched1.outboundPickupTime,
+          selectedReturnTime: sched1.defaultReturnTime,
+          status: 'ALLOCATED',
+          committedAt: new Date(now.getTime() - 4 * 60 * 60 * 1000),
+          lockedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+          allocatedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+        },
+      },
+      { upsert: true, returnDocument: 'after' }
+    );
+
+    const activeDemoTrip = await Trip.create({
+      tripCode: `MC-TRIP-${todayPrefix}-SLOT1`,
       corridorId: corridor._id,
-      slotId: eveningSlot._id,
+      slotId: todaySlot1._id,
+      sourceCommitmentId: todayCommitment._id,
       vehicleId: tier1Vehicle._id,
       driverId: driver1._id,
       shipmentIds: [],
       status: 'ASSIGNED',
-      plannedDepartureAt: eveningDeparture,
-      estimatedEndAt: eveningArrEnd,
+      scheduleSnapshot: {
+        serviceDate: todaySlot1.departureDate,
+        slotNumber: 1,
+        slotCode: todaySlot1.slotCode,
+        slotLabel: sched1.label,
+        outboundPickupTime: sched1.outboundPickupTime,
+        selectedReturnTime: sched1.defaultReturnTime,
+        returnTimeLocked: false,
+      },
+      vehicleSnapshot: {
+        registrationNumber: tier1Vehicle.registrationNumber,
+        vehicleClass: tier1Vehicle.vehicleClass,
+        bodyType: tier1Vehicle.bodyType,
+        maxWeightKg: tier1Vehicle.maxWeightKg,
+        maxVolumeCbm: tier1Vehicle.maxVolumeCbm,
+        bedDimensionsCm: tier1Vehicle.bedDimensionsCm,
+        ownershipType: 'DRIVER_OWNED',
+      },
+      plannedDepartureAt: todayDeparture,
+      estimatedEndAt: todayReturn,
+      allocationEconomics: {
+        allocatedTier: 'TIER_1',
+        tier1MinGuaranteeIncludedPaise: 320000,
+        selectedVehicleMinGuaranteePaise: 320000,
+        estimatedDistanceKm: 112,
+        estimatedVehiclePayoutPaise: 320000,
+        rightSized: false,
+        reason: 'Allocated Tier 1 driver-owned contract vehicle from locked Slot 1 commitment.',
+      },
       stopsSummary: corridor.stops.map((s) => ({
         stopCode: s.stopCode,
         name: s.name,
         sequenceOrder: s.sequenceOrder,
       })),
-      notes: 'Demo executable PM corridor trip (Tier 1 attached vehicle)',
+      notes: 'Assigned from locked Slot 1 availability commitment',
     });
 
     const ship3 = await Shipment.create({
-      reference: `MC-DEMO-${datePrefix.replace(/-/g, '')}-03`,
+      reference: `MC-DEMO-${todayPrefix.replace(/-/g, '')}-03`,
       businessId: business3._id,
       createdByUserId: shipper3._id,
       corridorId: corridor._id,
-      slotId: eveningSlot._id,
-      tripId: pmTrip._id,
+      slotId: todaySlot1._id,
+      tripId: activeDemoTrip._id,
       pickupStopCode: 'VAD',
       pickupStopOrder: 0,
       deliveryStopCode: 'AMD',
@@ -899,11 +1001,41 @@ export async function seedDatabase(options: SeedOptions = {}) {
       },
       trackingToken: tok3,
       qrToken: `MCR_${crypto.randomBytes(12).toString('hex')}`,
-      statusHistory: [{ status: 'LOCKED', at: now, note: 'Assigned to demo PM trip' }],
+      statusHistory: [{ status: 'LOCKED', at: now, note: 'Assigned to locked Slot 1 trip' }],
     });
 
-    pmTrip.shipmentIds = [ship3._id];
-    await pmTrip.save();
+    activeDemoTrip.shipmentIds = [ship3._id];
+    activeDemoTrip.routePlan = {
+      routeVersion: 1,
+      optimizationStatus: 'OPTIMAL',
+      provider: 'OR_TOOLS',
+      matrixProvider: 'FIXTURE',
+      totalDistanceMeters: 112400,
+      estimatedDurationSeconds: 7380,
+      orderedStops: [
+        { sequence: 0, stopCode: 'VAD', name: 'Vadodara', arrivalMin: 0, cumulativeDistanceMeters: 0, shipmentIds: [] },
+        { sequence: 1, stopCode: 'AMD', name: 'Ahmedabad', arrivalMin: 123, cumulativeDistanceMeters: 112400, shipmentIds: [String(ship3._id)] },
+      ],
+      optimizedAt: now,
+      routeHistory: [],
+    };
+    activeDemoTrip.stopsSummary = [
+      { stopCode: 'VAD', name: 'Vadodara', sequenceOrder: 0 },
+      { stopCode: 'AMD', name: 'Ahmedabad', sequenceOrder: 1 },
+    ];
+    activeDemoTrip.loadingPlan = buildLifoLoadingPlan({
+      orderedStops: [
+        { sequence: 0, stopCode: 'VAD' },
+        { sequence: 1, stopCode: 'AMD' },
+      ],
+      shipments: [ship3],
+      bedDimensionsCm: tier1Vehicle.bedDimensionsCm,
+      vehicleLimits: {
+        maxWeightKg: tier1Vehicle.maxWeightKg,
+        maxVolumeCbm: tier1Vehicle.maxVolumeCbm,
+      },
+    });
+    await activeDemoTrip.save();
 
     await Payment.insertMany([
       {
@@ -970,6 +1102,11 @@ export async function seedDatabase(options: SeedOptions = {}) {
     },
     { upsert: true, returnDocument: 'after', runValidators: true }
   );
+
+  const demoTrip = await Trip.findOne({ driverId: driver1._id }).sort({ createdAt: -1 });
+  if (demoTrip && !demoTrip.backhaulDecision) {
+    await evaluateBackhaulForTrip({ tripId: String(demoTrip._id), applyMatch: true });
+  }
 
   return {
     resetApplied: Boolean(options.reset),

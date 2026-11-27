@@ -36,7 +36,25 @@ export interface TripAllocationEconomics {
   reason: string;
 }
 
+export interface TripRouteVersionEntry {
+  version: number;
+  optimizationStatus: 'PENDING' | 'OPTIMAL' | 'INFEASIBLE' | 'OPTIMIZER_UNAVAILABLE';
+  totalDistanceMeters: number;
+  estimatedDurationSeconds: number;
+  orderedStops: Array<{
+    sequence: number;
+    stopCode: string;
+    name: string;
+    arrivalMin: number;
+    cumulativeDistanceMeters: number;
+    shipmentIds: string[];
+  }>;
+  reason?: string;
+  supersededAt: Date;
+}
+
 export interface TripRoutePlan {
+  routeVersion?: number;
   optimizationStatus: 'PENDING' | 'OPTIMAL' | 'INFEASIBLE' | 'OPTIMIZER_UNAVAILABLE';
   provider: 'OR_TOOLS' | 'NONE';
   matrixProvider: 'FIXTURE' | 'OSRM';
@@ -52,6 +70,7 @@ export interface TripRoutePlan {
   }>;
   failureReason?: string;
   optimizedAt?: Date;
+  routeHistory?: TripRouteVersionEntry[];
 }
 
 export type ZoneColor = 'GREEN' | 'YELLOW' | 'RED' | 'BLUE';
@@ -94,6 +113,33 @@ export interface TripLoadingPlan {
     at: Date;
   }>;
   planningAidDisclaimer: string;
+  planStatus?: 'READY' | 'UNAVAILABLE_MISSING_DIMENSIONS' | 'OVER_CAPACITY';
+  missingDimensions?: string[];
+  capacityIssues?: string[];
+}
+
+export interface TripScheduleSnapshot {
+  serviceDate: Date;
+  slotNumber?: 1 | 2;
+  slotCode: string;
+  slotLabel: string;
+  outboundPickupTime: string;
+  selectedReturnTime: string;
+  returnTimeLocked: boolean;
+}
+
+export interface TripVehicleSnapshot {
+  registrationNumber: string;
+  vehicleClass: string;
+  bodyType?: string;
+  maxWeightKg: number;
+  maxVolumeCbm: number;
+  bedDimensionsCm?: {
+    length: number;
+    width: number;
+    height: number;
+  };
+  ownershipType?: string;
 }
 
 export interface TripBackhaulDecision {
@@ -105,6 +151,11 @@ export interface TripBackhaulDecision {
   expectedReturnRevenuePaise: number;
   netContributionPaise: number;
   tier1MinGuaranteeIncludedPaise: number;
+  scheduledReturnTime?: string;
+  returnStops?: Array<{ stopCode: string; name: string; action: string }>;
+  returnShipmentCount?: number;
+  returnCargoSummary?: string;
+  emptyReturn?: boolean;
   reason: string;
   evaluatedAt: Date;
 }
@@ -115,10 +166,15 @@ export interface ITrip extends Document {
   poolId?: Types.ObjectId;
   corridorId: Types.ObjectId;
   slotId: Types.ObjectId;
+  sourceCommitmentId?: Types.ObjectId;
   vehicleId: Types.ObjectId;
   driverId: Types.ObjectId;
   shipmentIds: Types.ObjectId[];
   status: TripStatus;
+  quarantined?: boolean;
+  quarantineReason?: string;
+  scheduleSnapshot?: TripScheduleSnapshot;
+  vehicleSnapshot?: TripVehicleSnapshot;
   plannedDepartureAt: Date;
   estimatedEndAt: Date;
   actualStartedAt?: Date;
@@ -171,6 +227,12 @@ const tripSchema = new Schema<ITrip>(
     poolId: { type: Schema.Types.ObjectId, ref: 'Pool', unique: true, sparse: true },
     corridorId: { type: Schema.Types.ObjectId, ref: 'Corridor', required: true },
     slotId: { type: Schema.Types.ObjectId, ref: 'Slot', required: true },
+    sourceCommitmentId: {
+      type: Schema.Types.ObjectId,
+      ref: 'DriverSlotCommitment',
+      unique: true,
+      sparse: true,
+    },
     vehicleId: { type: Schema.Types.ObjectId, ref: 'Vehicle', required: true },
     driverId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     shipmentIds: [{ type: Schema.Types.ObjectId, ref: 'Shipment' }],
@@ -187,6 +249,30 @@ const tripSchema = new Schema<ITrip>(
         'CANCELLED',
       ],
       default: 'ASSIGNED',
+    },
+    quarantined: { type: Boolean, default: false },
+    quarantineReason: { type: String, trim: true },
+    scheduleSnapshot: {
+      serviceDate: { type: Date },
+      slotNumber: { type: Number, enum: [1, 2] },
+      slotCode: { type: String },
+      slotLabel: { type: String },
+      outboundPickupTime: { type: String },
+      selectedReturnTime: { type: String },
+      returnTimeLocked: { type: Boolean },
+    },
+    vehicleSnapshot: {
+      registrationNumber: { type: String },
+      vehicleClass: { type: String },
+      bodyType: { type: String },
+      maxWeightKg: { type: Number },
+      maxVolumeCbm: { type: Number },
+      bedDimensionsCm: {
+        length: { type: Number },
+        width: { type: Number },
+        height: { type: Number },
+      },
+      ownershipType: { type: String },
     },
     plannedDepartureAt: { type: Date, required: true },
     estimatedEndAt: { type: Date, required: true },
@@ -209,6 +295,7 @@ const tripSchema = new Schema<ITrip>(
       reason: { type: String },
     },
     routePlan: {
+      routeVersion: { type: Number, default: 1 },
       optimizationStatus: {
         type: String,
         enum: ['PENDING', 'OPTIMAL', 'INFEASIBLE', 'OPTIMIZER_UNAVAILABLE'],
@@ -220,6 +307,7 @@ const tripSchema = new Schema<ITrip>(
       orderedStops: { type: [Schema.Types.Mixed], default: [] },
       failureReason: { type: String },
       optimizedAt: { type: Date },
+      routeHistory: { type: [Schema.Types.Mixed], default: [] },
     },
     loadingPlan: {
       zoneMapping: { type: [Schema.Types.Mixed], default: [] },
@@ -227,6 +315,12 @@ const tripSchema = new Schema<ITrip>(
       overflowShipmentIds: { type: [String], default: [] },
       manualOverrides: { type: [Schema.Types.Mixed], default: [] },
       planningAidDisclaimer: { type: String },
+      planStatus: {
+        type: String,
+        enum: ['READY', 'UNAVAILABLE_MISSING_DIMENSIONS', 'OVER_CAPACITY'],
+      },
+      missingDimensions: { type: [String], default: undefined },
+      capacityIssues: { type: [String], default: undefined },
     },
     backhaulDecision: {
       decision: {
@@ -240,6 +334,11 @@ const tripSchema = new Schema<ITrip>(
       expectedReturnRevenuePaise: { type: Number, default: 0 },
       netContributionPaise: { type: Number, default: 0 },
       tier1MinGuaranteeIncludedPaise: { type: Number, default: 0 },
+      scheduledReturnTime: { type: String },
+      returnStops: { type: [Schema.Types.Mixed], default: undefined },
+      returnShipmentCount: { type: Number },
+      returnCargoSummary: { type: String },
+      emptyReturn: { type: Boolean },
       reason: { type: String },
       evaluatedAt: { type: Date },
     },

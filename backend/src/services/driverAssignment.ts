@@ -3,7 +3,10 @@ import { isValidObjectId, type ClientSession, type Types } from 'mongoose';
 import { withTransaction } from '../config/database.js';
 import { Corridor } from '../models/Corridor.js';
 import { DriverProfile } from '../models/DriverProfile.js';
-import { DriverSlotCommitment } from '../models/DriverSlotCommitment.js';
+import {
+  DriverSlotCommitment,
+  type IDriverSlotCommitment,
+} from '../models/DriverSlotCommitment.js';
 import { NotificationLog } from '../models/NotificationLog.js';
 import { Pool } from '../models/Pool.js';
 import { Shipment } from '../models/Shipment.js';
@@ -12,7 +15,12 @@ import { Trip, type ITrip } from '../models/Trip.js';
 import { emitDriverAssignment, emitPoolUpdated } from '../socket/poolGateway.js';
 import { HttpError } from '../utils/errors.js';
 import { allocateVehicleForPool } from './fleetAllocator.js';
-import { combineDateAndTime } from './driverSlotService.js';
+import {
+  combineDateAndTime,
+  isSameCalendarDay,
+  resolveSlotNumber,
+  resolveSlotTemplateForSlot,
+} from './driverSlotService.js';
 import { evaluateBackhaulForTrip } from './backhaulService.js';
 import { buildPoolLiveEvent } from './poolService.js';
 import { getActivePricingRules } from './pricingEngine.js';
@@ -208,6 +216,12 @@ export async function allocateAndAssignTripForPool(params: {
       pool.viabilityReason = allocation.reason;
       await pool.save({ session: session ?? undefined });
 
+      await DriverSlotCommitment.updateMany(
+        { slotId: slot._id, status: 'LOCKED' },
+        { $set: { status: 'NOT_ALLOCATED' } },
+        { session: session ?? undefined }
+      );
+
       for (const s of shipments) {
         s.viabilityDecision = 'PENDING_CHOICE';
         await s.save({ session: session ?? undefined });
@@ -223,17 +237,78 @@ export async function allocateAndAssignTripForPool(params: {
       };
     }
 
+    // MC-051: For Tier 1 allocation, never fall back to an uncommitted driver or mismatched commitment
+    if (allocation.vehicle.tier === 'TIER_1') {
+      const c: IDriverSlotCommitment | undefined = allocation.commitment;
+      const slotNum = resolveSlotNumber(slot);
+      const commitmentValid =
+        Boolean(c) &&
+        c!.status === 'LOCKED' &&
+        String(c!.corridorId) === String(corridor._id) &&
+        String(c!.slotId) === String(slot._id) &&
+        String(c!.driverUserId) === String(allocation.vehicle.driverId) &&
+        String(c!.vehicleId) === String(allocation.vehicle._id) &&
+        isSameCalendarDay(new Date(c!.departureDate), new Date(slot.departureDate)) &&
+        (!slotNum || c!.slotNumber === slotNum);
+
+      if (!commitmentValid || !c) {
+        return {
+          allocated: false,
+          driverAssigned: false,
+          reason:
+            'Tier 1 allocation blocked: no matching locked slot commitment for driver, corridor, slot, date, and vehicle.',
+        };
+      }
+
+      // Idempotency guard per sourceCommitmentId
+      const existingByCommitment = await Trip.findOne({ sourceCommitmentId: c._id }).session(session);
+      if (existingByCommitment) {
+        return {
+          allocated: true,
+          driverAssigned: true,
+          trip: existingByCommitment,
+          idempotentHit: true,
+          reason: 'Trip already allocated for this locked slot commitment.',
+        };
+      }
+    }
+
     // Step 2: Driver assignment ONLY after vehicle allocation succeeds
-    const eligibleDriver = await selectEligibleDriver({
-      preferredDriverId: allocation.vehicle.driverId,
-      tier: allocation.vehicle.tier,
-      windowStart: slot.plannedDepartureAt,
-      windowEnd: slot.estimatedArrivalEndAt,
-      session,
-    });
+    let eligibleDriver = null;
+    if (allocation.vehicle.tier === 'TIER_1') {
+      // Strictly bind Tier 1 trip to the exact committed driver-owner
+      const committedDriver = await DriverProfile.findOne({
+        userId: allocation.commitment!.driverUserId,
+        availabilityStatus: 'AVAILABLE',
+        accountStatus: 'ACTIVE',
+      }).session(session);
+      if (committedDriver) {
+        const overlaps = await hasOverlappingDriverTrip({
+          driverId: committedDriver.userId,
+          windowStart: slot.plannedDepartureAt,
+          windowEnd: slot.estimatedArrivalEndAt,
+          session,
+        });
+        if (!overlaps) {
+          eligibleDriver = committedDriver;
+        }
+      }
+    } else {
+      eligibleDriver = await selectEligibleDriver({
+        preferredDriverId: allocation.vehicle.driverId,
+        tier: allocation.vehicle.tier,
+        windowStart: slot.plannedDepartureAt,
+        windowEnd: slot.estimatedArrivalEndAt,
+        session,
+      });
+    }
 
     if (!eligibleDriver) {
-      // Do not silently proceed without a driver
+      await DriverSlotCommitment.updateMany(
+        { slotId: slot._id, status: 'LOCKED' },
+        { $set: { status: 'NOT_ALLOCATED' } },
+        { session: session ?? undefined }
+      );
       return {
         allocated: true,
         driverAssigned: false,
@@ -247,6 +322,18 @@ export async function allocateAndAssignTripForPool(params: {
       .toISOString()
       .slice(0, 10)
       .replace(/-/g, '')}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
+
+    const slotTemplate = resolveSlotTemplateForSlot(corridor, slot);
+    const snapSource = slot.scheduleSnapshot ?? slotTemplate;
+    const outboundPickupTime =
+      allocation.commitment?.selectedPickupTime ??
+      snapSource?.outboundPickupTime ??
+      new Date(slot.plannedDepartureAt).toISOString().slice(11, 16);
+    const selectedReturnTime =
+      allocation.commitment?.selectedReturnTime ??
+      snapSource?.lockedReturnTime ??
+      snapSource?.defaultReturnTime ??
+      new Date(slot.estimatedArrivalEndAt).toISOString().slice(11, 16);
 
     const estimatedEndAt = allocation.commitment?.selectedReturnTime
       ? (() => {
@@ -264,10 +351,29 @@ export async function allocateAndAssignTripForPool(params: {
           poolId: pool._id,
           corridorId: corridor._id,
           slotId: slot._id,
+          ...(allocation.commitment ? { sourceCommitmentId: allocation.commitment._id } : {}),
           vehicleId: allocation.vehicle._id,
           driverId: eligibleDriver.userId,
           shipmentIds: shipments.map((s) => s._id),
           status: 'ASSIGNED',
+          scheduleSnapshot: {
+            serviceDate: slot.departureDate,
+            slotNumber: allocation.commitment?.slotNumber ?? resolveSlotNumber(slot) ?? undefined,
+            slotCode: slot.slotCode,
+            slotLabel: slot.label,
+            outboundPickupTime,
+            selectedReturnTime,
+            returnTimeLocked: Boolean(slot.returnTimeLocked ?? snapSource?.returnTimeLocked),
+          },
+          vehicleSnapshot: {
+            registrationNumber: allocation.vehicle.registrationNumber,
+            vehicleClass: allocation.vehicle.vehicleClass,
+            bodyType: allocation.vehicle.bodyType,
+            maxWeightKg: allocation.vehicle.maxWeightKg,
+            maxVolumeCbm: allocation.vehicle.maxVolumeCbm,
+            bedDimensionsCm: allocation.vehicle.bedDimensionsCm,
+            ownershipType: allocation.vehicle.ownershipType,
+          },
           plannedDepartureAt: slot.plannedDepartureAt,
           estimatedEndAt,
           stopsSummary: corridor.stops.map((s) => ({
@@ -303,16 +409,16 @@ export async function allocateAndAssignTripForPool(params: {
       await DriverSlotCommitment.updateMany(
         {
           slotId: slot._id,
-          status: 'COMMITTED',
+          status: { $in: ['LOCKED', 'COMMITTED'] },
           _id: { $ne: allocation.commitment._id },
         },
-        { $set: { status: 'EXPIRED' } },
+        { $set: { status: 'NOT_ALLOCATED' } },
         { session: session ?? undefined }
       );
     } else {
       await DriverSlotCommitment.updateMany(
-        { slotId: slot._id, status: 'COMMITTED' },
-        { $set: { status: 'EXPIRED' } },
+        { slotId: slot._id, status: { $in: ['LOCKED', 'COMMITTED'] } },
+        { $set: { status: 'NOT_ALLOCATED' } },
         { session: session ?? undefined }
       );
     }
