@@ -68,7 +68,7 @@ export function BookShipmentPage() {
   );
 
   const [corridorId, setCorridorId] = useState(searchParams.get('corridorId') ?? '');
-  const [slotId, setSlotId] = useState(searchParams.get('slotId') ?? '');
+  const [serviceDate, setServiceDate] = useState(searchParams.get('serviceDate') ?? '');
   const [pickupStopCode, setPickupStopCode] = useState('');
   const [deliveryStopCode, setDeliveryStopCode] = useState('');
 
@@ -114,15 +114,14 @@ export function BookShipmentPage() {
     [corridors, corridorId]
   );
 
-  const effectiveSlotId = useMemo(() => {
-    if (slotId && selectedCorridor?.slots.some((s) => s._id === slotId)) {
-      return slotId;
+  const effectiveServiceDate = useMemo(() => {
+    const dates = selectedCorridor?.serviceDates ?? [];
+    if (serviceDate && dates.some((d) => d.serviceDate === serviceDate && d.bookable)) {
+      return serviceDate;
     }
-    const openSlot = selectedCorridor?.slots.find(
-      (s) => s.status === 'OPEN' && !s.isPastCutoff
-    );
-    return openSlot?._id ?? '';
-  }, [slotId, selectedCorridor]);
+    const openDate = dates.find((d) => d.bookable);
+    return openDate?.serviceDate ?? '';
+  }, [serviceDate, selectedCorridor]);
 
   const effectivePickupStopCode = useMemo(() => {
     if (
@@ -161,11 +160,12 @@ export function BookShipmentPage() {
       })
         .then((res) => {
           setCalcResult(res.metrics);
-          if (selectedCorridor?._id && effectiveSlotId) {
+          if (selectedCorridor?._id && effectiveServiceDate) {
             return fetchQuotePreview({
               corridorId: selectedCorridor._id,
-              slotId: effectiveSlotId,
+              serviceDate: effectiveServiceDate,
               chargeableWeightKg: res.metrics.chargeableWeightKg,
+              volumeCbm: res.metrics.totalVolumeCbm,
             }).then((q) => setQuoteResult(q.breakdown));
           }
         })
@@ -185,7 +185,7 @@ export function BookShipmentPage() {
     unitActualWeight,
     weightUnit,
     selectedCorridor?._id,
-    effectiveSlotId,
+    effectiveServiceDate,
   ]);
 
   const applyPreset = (cat: CargoCategory) => {
@@ -346,14 +346,14 @@ export function BookShipmentPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    if (!selectedCorridor || !effectiveSlotId) {
-      setFormError('Please select a corridor and an open departure slot.');
+    if (!selectedCorridor || !effectiveServiceDate) {
+      setFormError('Please select a corridor and an upcoming bookable service date.');
       return;
     }
 
     bookMutation.mutate({
       corridorId: selectedCorridor._id,
-      slotId: effectiveSlotId,
+      serviceDate: effectiveServiceDate,
       pickupStopCode: effectivePickupStopCode,
       deliveryStopCode: effectiveDeliveryStopCode,
       deliveryAddress: {
@@ -406,11 +406,11 @@ export function BookShipmentPage() {
         </div>
       ) : null}
 
-      {/* Corridor & Slot */}
+      {/* Corridor & Service Date */}
       <Card>
         <CardHeader>
           <h2 className="text-base font-semibold text-slate-900">
-            1. Corridor, Departure Slot & Stops
+            1. Corridor, Service Date & Stops
           </h2>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -422,7 +422,7 @@ export function BookShipmentPage() {
               value={selectedCorridor?._id ?? ''}
               onChange={(e) => {
                 setCorridorId(e.target.value);
-                setSlotId('');
+                setServiceDate('');
               }}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             >
@@ -436,23 +436,33 @@ export function BookShipmentPage() {
 
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-700">
-              Departure Slot (Cutoff enforced)
+              Service Date (Automatic Pool Matching)
             </label>
             <select
-              value={effectiveSlotId}
-              onChange={(e) => setSlotId(e.target.value)}
+              value={effectiveServiceDate}
+              onChange={(e) => setServiceDate(e.target.value)}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             >
-              {selectedCorridor?.slots.map((s) => (
+              {(selectedCorridor?.serviceDates ?? []).map((sd) => (
                 <option
-                  key={s._id}
-                  value={s._id}
-                  disabled={s.isPastCutoff || s.status !== 'OPEN'}
+                  key={sd.serviceDate}
+                  value={sd.serviceDate}
+                  disabled={!sd.bookable}
                 >
-                  {s.label} ({s.isPastCutoff ? 'CUTOFF PASSED' : `${s.availableWeightKg} kg free`})
+                  {new Date(sd.departureDate ?? sd.serviceDate).toLocaleDateString('en-IN', {
+                    weekday: 'short',
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                  })}{' '}
+                  [{sd.status}] — {sd.availableWeightKg.toFixed(0)} kg /{' '}
+                  {sd.availableVolumeCbm.toFixed(1)} m³ free
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-[11px] text-slate-500">
+              MeeCargo automatically associates your booking with the best operational pool.
+            </p>
           </div>
 
           <div>
@@ -682,7 +692,7 @@ export function BookShipmentPage() {
             <div className="rounded-xl border border-sky-200 bg-sky-50/70 p-4 text-xs space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-semibold text-sky-950">
-                  Projected Price Breakdown ({quoteResult.appliedTierLabel})
+                  Projected Price Breakdown (Rate: {formatPaise(quoteResult.effectiveRatePaisePerKg)} / Chargeable kg)
                 </span>
                 <Badge variant="warning">Non-Final Estimate Until Cutoff</Badge>
               </div>
@@ -718,11 +728,17 @@ export function BookShipmentPage() {
                   </p>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-600">
-                Refundable booking token required to enter pool:{' '}
-                <strong>{formatPaise(quoteResult.tokenAmountPaise)}</strong> (never exceeds
-                guaranteed ceiling).
-              </p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-600">
+                <span>
+                  Refundable booking token:{' '}
+                  <strong className="text-slate-900">{formatPaise(quoteResult.tokenAmountPaise)}</strong>
+                </span>
+                <span>
+                  Remaining payable balance:{' '}
+                  <strong className="text-slate-900">{formatPaise(quoteResult.remainingBalancePaise)}</strong>
+                </span>
+                <span>(Never exceeds guaranteed price ceiling.)</span>
+              </div>
             </div>
           ) : null}
 

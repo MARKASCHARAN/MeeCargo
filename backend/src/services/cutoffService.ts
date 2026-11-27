@@ -19,6 +19,7 @@ import {
   removeShipmentFromPool,
 } from './poolService.js';
 import { calculateDeterministicPrice, getActivePricingRules } from './pricingEngine.js';
+import { matchOperationalSlotForBooking } from './shipmentService.js';
 
 export interface ViabilityEvaluation {
   viable: boolean;
@@ -364,8 +365,9 @@ export async function submitViabilityDecision(params: {
   userId: string;
   decision: 'ROLLOVER' | 'REFUND';
   targetSlotId?: string;
+  targetServiceDate?: string;
 }) {
-  const { shipmentId, businessId, userId, decision, targetSlotId } = params;
+  const { shipmentId, businessId, userId, decision, targetSlotId, targetServiceDate } = params;
   if (!isValidObjectId(shipmentId)) {
     throw new HttpError(400, 'Invalid shipmentId', 'VALIDATION_ERROR');
   }
@@ -431,11 +433,24 @@ export async function submitViabilityDecision(params: {
       return { shipment, refund, decision: 'REFUND' as const };
     }
 
-    // ROLLOVER path requires explicit targetSlotId
-    if (!targetSlotId || !isValidObjectId(targetSlotId)) {
+    // ROLLOVER path supports backend auto-matching via targetServiceDate (or explicit targetSlotId)
+    let resolvedTargetSlotId = targetSlotId;
+    if (!resolvedTargetSlotId && targetServiceDate) {
+      const matched = await matchOperationalSlotForBooking({
+        corridorId: shipment.corridorId,
+        serviceDate: targetServiceDate,
+        chargeableWeightKg: shipment.cargo.chargeableWeightKg,
+        volumeCbm: shipment.cargo.volumeCbm,
+        excludeSlotId: oldSlotId,
+        session,
+      });
+      resolvedTargetSlotId = String(matched._id);
+    }
+
+    if (!resolvedTargetSlotId || !isValidObjectId(resolvedTargetSlotId)) {
       throw new HttpError(
         400,
-        'A valid future targetSlotId is required for consented rollover.',
+        'A valid future targetServiceDate or targetSlotId is required for consented rollover.',
         'TARGET_SLOT_REQUIRED'
       );
     }
@@ -443,7 +458,7 @@ export async function submitViabilityDecision(params: {
     const corridor = await Corridor.findById(shipment.corridorId).session(session);
     const targetSlot = await Slot.findOneAndUpdate(
       {
-        _id: targetSlotId,
+        _id: resolvedTargetSlotId,
         corridorId: shipment.corridorId,
         status: 'OPEN',
         cutoffAt: { $gt: new Date() },
@@ -524,4 +539,40 @@ export async function submitViabilityDecision(params: {
 
     return { shipment, targetPool: pool, liveEvent, decision: 'ROLLOVER' as const };
   });
+}
+
+/**
+ * Automatically closes OPEN pooling windows whose cutoffAt timestamp has passed,
+ * calculates the final pooled rate / snapshot, and triggers automated allocation.
+ */
+export async function processExpiredOpenPools(now: Date = new Date()): Promise<{
+  processedCount: number;
+  expiredEmptySlotsCount: number;
+}> {
+  const expiredSlots = await Slot.find({
+    status: 'OPEN',
+    cutoffAt: { $lte: now },
+  }).sort({ cutoffAt: 1 });
+
+  let processedCount = 0;
+  let expiredEmptySlotsCount = 0;
+
+  for (const slot of expiredSlots) {
+    const openPool = await Pool.findOne({ slotId: slot._id, status: 'OPEN' });
+    if (openPool) {
+      await executePoolCutoff({
+        poolId: String(openPool._id),
+        enforceCutoffClock: true,
+      }).catch(() => undefined);
+      processedCount += 1;
+    } else {
+      await Slot.updateOne(
+        { _id: slot._id, status: 'OPEN' },
+        { $set: { status: 'CANCELLED' } }
+      );
+      expiredEmptySlotsCount += 1;
+    }
+  }
+
+  return { processedCount, expiredEmptySlotsCount };
 }

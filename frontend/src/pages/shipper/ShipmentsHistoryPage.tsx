@@ -114,16 +114,16 @@ export function ShipmentsHistoryPage() {
     mutationFn: ({
       shipmentId,
       decision,
-      targetSlotId,
+      targetServiceDate,
     }: {
       shipmentId: string;
       decision: 'ROLLOVER' | 'REFUND';
-      targetSlotId?: string;
-    }) => submitViabilityDecision(shipmentId, { decision, targetSlotId }),
+      targetServiceDate?: string;
+    }) => submitViabilityDecision(shipmentId, { decision, targetServiceDate }),
     onSuccess: (res) => {
       setActionMsg(
         res.decision === 'ROLLOVER'
-          ? 'Shipment rolled over to selected future slot with your consent.'
+          ? 'Shipment rolled over to selected future service date with your consent.'
           : 'Full token refund issued for non-viable new route.'
       );
       invalidateAll();
@@ -282,19 +282,29 @@ export function ShipmentsHistoryPage() {
               typeof s.corridorId === 'object' ? s.corridorId._id : s.corridorId;
             const corridorName =
               typeof s.corridorId === 'object' ? s.corridorId.name : 'Corridor';
-            const slotIdStr = typeof s.slotId === 'object' ? s.slotId._id : s.slotId;
-            const slotLabel =
-              typeof s.slotId === 'object' ? s.slotId.label : 'Slot';
+            const slotObj = typeof s.slotId === 'object' ? s.slotId : null;
+            const serviceDateRaw = slotObj?.departureDate ?? slotObj?.plannedDepartureAt;
+            const serviceDateKey = serviceDateRaw
+              ? new Date(serviceDateRaw).toISOString().slice(0, 10)
+              : '';
+            const serviceDateLabel = serviceDateRaw
+              ? new Date(serviceDateRaw).toLocaleDateString('en-IN', {
+                  weekday: 'short',
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
+                })
+              : 'Scheduled Dispatch';
 
-            const futureSlots =
+            const futureServiceDates =
               corridors
                 .find((c) => c._id === corridorIdStr)
-                ?.slots.filter(
-                  (sl) => sl._id !== slotIdStr && sl.status === 'OPEN' && !sl.isPastCutoff
+                ?.serviceDates?.filter(
+                  (sd) => sd.bookable && sd.serviceDate !== serviceDateKey
                 ) ?? [];
 
-            const selectedRolloverSlot =
-              rolloverTargets[s._id] ?? futureSlots[0]?._id ?? '';
+            const selectedRolloverDate =
+              rolloverTargets[s._id] ?? futureServiceDates[0]?.serviceDate ?? '';
 
             const pricing = s.pricingSnapshot;
 
@@ -329,7 +339,7 @@ export function ShipmentsHistoryPage() {
                       ) : null}
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      {corridorName} • {slotLabel}
+                      {corridorName} • Service Date: {serviceDateLabel}
                     </p>
                   </div>
 
@@ -493,16 +503,16 @@ export function ShipmentsHistoryPage() {
                           </p>
                           <p className="mt-0.5 text-amber-900">
                             No trip was created. Choose whether to roll over your shipment to a
-                            future compatible slot or receive a full token refund.
+                            future service date or receive a full token refund.
                           </p>
                         </div>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        {futureSlots.length > 0 ? (
+                        {futureServiceDates.length > 0 ? (
                           <>
                             <select
-                              value={selectedRolloverSlot}
+                              value={selectedRolloverDate}
                               onChange={(e) =>
                                 setRolloverTargets((prev) => ({
                                   ...prev,
@@ -511,9 +521,15 @@ export function ShipmentsHistoryPage() {
                               }
                               className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs"
                             >
-                              {futureSlots.map((sl) => (
-                                <option key={sl._id} value={sl._id}>
-                                  {sl.label} ({sl.slotCode})
+                              {futureServiceDates.map((sd) => (
+                                <option key={sd.serviceDate} value={sd.serviceDate}>
+                                  {new Date(sd.departureDate ?? sd.serviceDate).toLocaleDateString('en-IN', {
+                                    weekday: 'short',
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric',
+                                  })}{' '}
+                                  ({sd.availableWeightKg.toFixed(0)} kg free)
                                 </option>
                               ))}
                             </select>
@@ -525,7 +541,7 @@ export function ShipmentsHistoryPage() {
                                 viabilityMutation.mutate({
                                   shipmentId: s._id,
                                   decision: 'ROLLOVER',
-                                  targetSlotId: selectedRolloverSlot,
+                                  targetServiceDate: selectedRolloverDate,
                                 })
                               }
                             >
@@ -535,7 +551,7 @@ export function ShipmentsHistoryPage() {
                           </>
                         ) : (
                           <span className="text-amber-900">
-                            No future open slots available for rollover.
+                            No future bookable service dates available for rollover.
                           </span>
                         )}
 
@@ -615,11 +631,13 @@ export function ShipmentsHistoryPage() {
                                 </div>
                                 {ex.resolutionStatus === 'OPEN' ? (
                                   <div className="flex flex-wrap items-center gap-2">
-                                    {futureSlots.length > 0 ? (
+                                    {futureServiceDates.length > 0 ? (
                                       <>
                                         <select
                                           value={
-                                            rescheduleSlots[ex._id] ?? futureSlots[0]?._id ?? ''
+                                            rescheduleSlots[ex._id] ??
+                                            futureServiceDates[0]?.serviceDate ??
+                                            ''
                                           }
                                           onChange={(e) =>
                                             setRescheduleSlots((prev) => ({
@@ -629,9 +647,15 @@ export function ShipmentsHistoryPage() {
                                           }
                                           className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
                                         >
-                                          {futureSlots.map((sl) => (
-                                            <option key={sl._id} value={sl._id}>
-                                              {sl.label} ({sl.slotCode})
+                                          {futureServiceDates.map((sd) => (
+                                            <option key={sd.serviceDate} value={sd.serviceDate}>
+                                              {new Date(sd.departureDate ?? sd.serviceDate).toLocaleDateString('en-IN', {
+                                                weekday: 'short',
+                                                day: '2-digit',
+                                                month: 'short',
+                                                year: 'numeric',
+                                              })}{' '}
+                                              ({sd.availableWeightKg.toFixed(0)} kg free)
                                             </option>
                                           ))}
                                         </select>
@@ -639,15 +663,16 @@ export function ShipmentsHistoryPage() {
                                           size="sm"
                                           variant="primary"
                                           onClick={() => {
-                                            const slotId =
-                                              rescheduleSlots[ex._id] ?? futureSlots[0]?._id;
+                                            const targetServiceDate =
+                                              rescheduleSlots[ex._id] ??
+                                              futureServiceDates[0]?.serviceDate;
                                             void resolveShipmentException(ex._id, {
                                               action: 'RESCHEDULE',
-                                              targetSlotId: slotId,
+                                              targetServiceDate,
                                               note: 'Rescheduled from shipper console',
                                             }).then(() => {
                                               setActionMsg(
-                                                `Shipment ${s.reference} rescheduled to selected future slot.`
+                                                `Shipment ${s.reference} rescheduled to selected service date.`
                                               );
                                               invalidateAll();
                                               return fetchShipmentExceptions(s._id).then((r) =>
@@ -659,7 +684,7 @@ export function ShipmentsHistoryPage() {
                                             });
                                           }}
                                         >
-                                          Reschedule Slot
+                                          Reschedule Date
                                         </Button>
                                       </>
                                     ) : null}

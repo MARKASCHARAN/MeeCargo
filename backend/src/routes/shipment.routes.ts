@@ -8,7 +8,7 @@ import { ExceptionEvent } from '../models/ExceptionEvent.js';
 import { Payment } from '../models/Payment.js';
 import { PickupCollection } from '../models/PickupCollection.js';
 import { Shipment } from '../models/Shipment.js';
-import { Slot } from '../models/Slot.js';
+import { Slot, type ISlot } from '../models/Slot.js';
 import {
   calculateCargoMetrics,
   CARGO_PRESETS,
@@ -32,6 +32,8 @@ import {
   confirmShipmentToken,
   createBookingSchema,
   createShipmentBooking,
+  matchOperationalSlotForBooking,
+  toServiceDateKey,
 } from '../services/shipmentService.js';
 import { serializeCsv } from '../utils/csv.js';
 import { HttpError } from '../utils/errors.js';
@@ -80,25 +82,65 @@ router.post('/calculate-chargeable-weight', requireAuth, (req, res) => {
 });
 
 router.post('/quote-preview', requireAuth, async (req, res) => {
-  const schema = z.object({
-    corridorId: z.string().min(1),
-    slotId: z.string().min(1),
-    chargeableWeightKg: z.number().positive(),
-    isAnchorEligible: z.boolean().default(false),
-  });
+  const schema = z
+    .object({
+      corridorId: z.string().min(1),
+      slotId: z.string().min(1).optional(),
+      serviceDate: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, 'serviceDate must be YYYY-MM-DD')
+        .optional(),
+      chargeableWeightKg: z.number().positive(),
+      volumeCbm: z.number().nonnegative().optional(),
+      isAnchorEligible: z.boolean().default(false),
+    })
+    .refine((d) => Boolean(d.slotId || d.serviceDate), {
+      message: 'serviceDate or slotId is required',
+      path: ['serviceDate'],
+    });
   const parsed = schema.safeParse(req.body);
-  if (!parsed.success || !isValidObjectId(parsed.data.corridorId) || !isValidObjectId(parsed.data.slotId)) {
+  if (
+    !parsed.success ||
+    !isValidObjectId(parsed.data.corridorId) ||
+    (parsed.data.slotId && !isValidObjectId(parsed.data.slotId))
+  ) {
     throw new HttpError(400, 'Invalid quote preview request', 'VALIDATION_ERROR');
   }
 
-  const [corridor, slot, rules] = await Promise.all([
+  const [corridor, rules] = await Promise.all([
     Corridor.findById(parsed.data.corridorId),
-    Slot.findById(parsed.data.slotId),
     getActivePricingRules(),
   ]);
 
-  if (!corridor || !slot) {
-    throw new HttpError(404, 'Corridor or slot not found', 'NOT_FOUND');
+  if (!corridor) {
+    throw new HttpError(404, 'Corridor not found', 'NOT_FOUND');
+  }
+
+  let slot: ISlot | null = parsed.data.slotId
+    ? ((await Slot.findById(parsed.data.slotId)) as ISlot | null)
+    : null;
+  if (!slot && parsed.data.serviceDate) {
+    try {
+      slot = await matchOperationalSlotForBooking({
+        corridorId: corridor._id,
+        serviceDate: parsed.data.serviceDate,
+        chargeableWeightKg: parsed.data.chargeableWeightKg,
+        volumeCbm: parsed.data.volumeCbm ?? 0,
+      });
+    } catch {
+      const candidateSlots = await Slot.find({
+        corridorId: corridor._id,
+        status: { $in: ['OPEN', 'LOCKING', 'LOCKED'] },
+      }).sort({ plannedDepartureAt: 1 });
+      slot =
+        (candidateSlots.find(
+          (s) => toServiceDateKey(s.departureDate) === parsed.data.serviceDate
+        ) as ISlot | undefined) ?? null;
+    }
+  }
+
+  if (!slot) {
+    throw new HttpError(404, 'Corridor service date or pool not found', 'NOT_FOUND');
   }
 
   const weightUtil = (slot.reservedWeightKg / slot.capacityWeightKg) * 100;
@@ -126,7 +168,9 @@ router.use(requireAuth, requireRole('SHIPPER'));
 
 router.get('/import/template', async (_req, res) => {
   const openSlot = await Slot.findOne({ status: 'OPEN' }).sort({ plannedDepartureAt: 1 });
-  const csv = buildCsvTemplate(openSlot?.slotCode);
+  const csv = buildCsvTemplate(
+    openSlot ? toServiceDateKey(openSlot.departureDate) : undefined
+  );
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="meecargo-shipments-template.csv"');
   res.send(csv);
@@ -271,7 +315,7 @@ router.get('/', requireBusinessProfile, async (req, res) => {
 
   const shipments = await Shipment.find(filter)
     .populate('corridorId', 'code name')
-    .populate('slotId', 'slotCode label plannedDepartureAt cutoffAt')
+    .populate('slotId', 'slotCode label departureDate plannedDepartureAt cutoffAt')
     .sort({ createdAt: -1 })
     .lean();
 
@@ -424,6 +468,10 @@ router.post('/:shipmentId/viability-decision', requireBusinessProfile, async (re
   const schema = z.object({
     decision: z.enum(['ROLLOVER', 'REFUND']),
     targetSlotId: z.string().optional(),
+    targetServiceDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'targetServiceDate must be YYYY-MM-DD')
+      .optional(),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {
@@ -436,6 +484,7 @@ router.post('/:shipmentId/viability-decision', requireBusinessProfile, async (re
     userId: req.auth!.userId,
     decision: parsed.data.decision,
     targetSlotId: parsed.data.targetSlotId,
+    targetServiceDate: parsed.data.targetServiceDate,
   });
 
   res.json({
@@ -526,6 +575,10 @@ router.post('/exceptions/:exceptionId/resolve', requireBusinessProfile, async (r
   const schema = z.object({
     action: z.enum(['RESCHEDULE', 'RETURN', 'REALLOCATE']),
     targetSlotId: z.string().trim().optional(),
+    targetServiceDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
     note: z.string().trim().max(300).optional(),
   });
   const parsed = schema.safeParse(req.body ?? {});
@@ -539,6 +592,7 @@ router.post('/exceptions/:exceptionId/resolve', requireBusinessProfile, async (r
     userId: req.auth!.userId,
     action: parsed.data.action,
     targetSlotId: parsed.data.targetSlotId || undefined,
+    targetServiceDate: parsed.data.targetServiceDate || undefined,
     note: parsed.data.note,
   });
 
@@ -561,7 +615,7 @@ router.get('/:shipmentId', requireBusinessProfile, async (req, res) => {
     businessId: req.businessProfile!._id,
   })
     .populate('corridorId', 'code name stops')
-    .populate('slotId', 'slotCode label plannedDepartureAt cutoffAt estimatedArrivalStartAt estimatedArrivalEndAt');
+    .populate('slotId', 'slotCode label departureDate plannedDepartureAt cutoffAt estimatedArrivalStartAt estimatedArrivalEndAt');
 
   if (!shipment) {
     throw new HttpError(

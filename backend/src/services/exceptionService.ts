@@ -21,6 +21,7 @@ import { sendLifecycleNotification } from './notificationService.js';
 import { savePodPhotoLocal } from './podStorageService.js';
 import { addShipmentToPool } from './poolService.js';
 import { optimizeAndPlanTripRoute } from './routePlanningService.js';
+import { matchOperationalSlotForBooking } from './shipmentService.js';
 
 const SHIPMENT_FAIL_EXCEPTIONS = new Set<ExceptionType>([
   'CUSTOMER_UNAVAILABLE',
@@ -335,6 +336,7 @@ export async function reportTripException(params: {
     const opt = await optimizeAndPlanTripRoute({
       tripId: String(trip._id),
       actorUserId: driverUserId,
+      replanReason: `${exceptionType}: ${reason.trim()}`,
     }).catch(() => null);
     if (opt) {
       exceptionDoc.routeRecalculated = true;
@@ -354,9 +356,10 @@ export async function resolveShipmentException(params: {
   userId: string;
   action: 'RESCHEDULE' | 'RETURN' | 'REALLOCATE';
   targetSlotId?: string;
+  targetServiceDate?: string;
   note?: string;
 }) {
-  const { exceptionId, businessId, userId, action, targetSlotId, note } = params;
+  const { exceptionId, businessId, userId, action, targetSlotId, targetServiceDate, note } = params;
   if (!isValidObjectId(exceptionId)) {
     throw new HttpError(400, 'Invalid exception ID', 'VALIDATION_ERROR');
   }
@@ -397,8 +400,26 @@ export async function resolveShipmentException(params: {
       await shipment.save({ session: session ?? undefined });
       exception.resolutionStatus = 'RETURNED';
     } else if (action === 'RESCHEDULE') {
-      if (!targetSlotId || !isValidObjectId(targetSlotId)) {
-        throw new HttpError(400, 'targetSlotId is required for reschedule', 'VALIDATION_ERROR');
+      let resolvedTargetSlotId = targetSlotId;
+      if (!resolvedTargetSlotId && targetServiceDate) {
+        const matched = await matchOperationalSlotForBooking({
+          corridorId: shipment.corridorId,
+          serviceDate: targetServiceDate,
+          chargeableWeightKg: shipment.cargo.chargeableWeightKg,
+          volumeCbm: shipment.cargo.volumeCbm,
+          excludeSlotId: shipment.slotId,
+          now,
+          session,
+        });
+        resolvedTargetSlotId = String(matched._id);
+      }
+
+      if (!resolvedTargetSlotId || !isValidObjectId(resolvedTargetSlotId)) {
+        throw new HttpError(
+          400,
+          'targetServiceDate or targetSlotId is required for reschedule',
+          'VALIDATION_ERROR'
+        );
       }
       if (!isValidShipmentTransition(shipment.status, 'ROLLED_OVER')) {
         throw new HttpError(
@@ -410,7 +431,7 @@ export async function resolveShipmentException(params: {
       const corridor = await Corridor.findById(shipment.corridorId).session(session);
       const targetSlot = await Slot.findOneAndUpdate(
         {
-          _id: targetSlotId,
+          _id: resolvedTargetSlotId,
           corridorId: shipment.corridorId,
           status: 'OPEN',
           cutoffAt: { $gt: now },

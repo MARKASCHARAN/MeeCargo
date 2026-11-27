@@ -1,17 +1,19 @@
 import crypto from 'node:crypto';
-import { isValidObjectId, type Types } from 'mongoose';
+import { isValidObjectId, type ClientSession, type Types } from 'mongoose';
 import { z } from 'zod';
 import { withTransaction } from '../config/database.js';
 import type { IBusinessProfile, StructuredAddress } from '../models/BusinessProfile.js';
 import { isValidLngLat } from '../models/common.js';
 import { Corridor } from '../models/Corridor.js';
+import { DriverSlotCommitment } from '../models/DriverSlotCommitment.js';
+import { Pool } from '../models/Pool.js';
 import {
   isValidShipmentTransition,
   Shipment,
   type IShipment,
   type PaymentChoice,
 } from '../models/Shipment.js';
-import { Slot } from '../models/Slot.js';
+import { Slot, type ISlot } from '../models/Slot.js';
 import { HttpError } from '../utils/errors.js';
 import {
   calculateCargoMetrics,
@@ -33,10 +35,15 @@ export const addressSchema = z.object({
   }),
 });
 
-export const createBookingSchema = z.object({
-  corridorId: z.string().min(1),
-  slotId: z.string().min(1),
-  pickupStopCode: z.string().trim().min(2).max(16),
+export const createBookingSchema = z
+  .object({
+    corridorId: z.string().min(1),
+    slotId: z.string().min(1).optional(),
+    serviceDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'serviceDate must be in YYYY-MM-DD format')
+      .optional(),
+    pickupStopCode: z.string().trim().min(2).max(16),
   deliveryStopCode: z.string().trim().min(2).max(16),
   pickupAddress: addressSchema.optional(),
   deliveryAddress: addressSchema,
@@ -68,7 +75,145 @@ export const createBookingSchema = z.object({
     .default('TOKEN_PLUS_PICKUP_BALANCE'),
   idempotencyKey: z.string().trim().min(4).max(120).optional(),
   externalOrderRef: z.string().trim().min(1).max(80).optional(),
-});
+})
+  .refine((data) => Boolean(data.slotId || data.serviceDate), {
+    message: 'serviceDate is required for shipment booking',
+    path: ['serviceDate'],
+  });
+
+export function toServiceDateKey(date?: Date | string | null): string {
+  if (!date) return '';
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
+}
+
+/**
+ * Backend-controlled matcher that associates a shipper booking (corridor + serviceDate + cargo)
+ * with the most suitable operational pool/slot, prioritizing active Tier 1 driver commitments
+ * and consolidatable open pools without exposing driver slot selection to shippers.
+ */
+export async function matchOperationalSlotForBooking(params: {
+  corridorId: Types.ObjectId;
+  serviceDate: string;
+  chargeableWeightKg?: number;
+  volumeCbm?: number;
+  excludeSlotId?: Types.ObjectId;
+  now?: Date;
+  session?: ClientSession | null;
+}): Promise<ISlot> {
+  const now = params.now ?? new Date();
+  const requiredWeight = params.chargeableWeightKg ?? 0;
+  const requiredVolume = params.volumeCbm ?? 0;
+
+  const candidateQuery = Slot.find({
+    corridorId: params.corridorId,
+    status: { $in: ['OPEN', 'LOCKING', 'LOCKED'] },
+  }).sort({ plannedDepartureAt: 1 });
+
+  const allSlots = params.session
+    ? await candidateQuery.session(params.session)
+    : await candidateQuery;
+
+  const slotsOnDate = allSlots.filter(
+    (s) =>
+      toServiceDateKey(s.departureDate) === params.serviceDate &&
+      (!params.excludeSlotId || !s._id.equals(params.excludeSlotId))
+  );
+
+  if (slotsOnDate.length === 0) {
+    throw new HttpError(
+      404,
+      `No operational service is scheduled on ${params.serviceDate} for this corridor.`,
+      'NO_SERVICE_ON_DATE'
+    );
+  }
+
+  const openSlots = slotsOnDate.filter(
+    (s) => s.status === 'OPEN' && now < new Date(s.cutoffAt)
+  );
+  if (openSlots.length === 0) {
+    throw new HttpError(
+      409,
+      `Booking cutoff has passed or pooling window is closed for ${params.serviceDate}.`,
+      'CUTOFF_PASSED'
+    );
+  }
+
+  const fittingSlots = openSlots.filter(
+    (s) =>
+      s.capacityWeightKg - s.reservedWeightKg >= requiredWeight &&
+      s.capacityVolumeCbm - s.reservedVolumeCbm >= requiredVolume
+  );
+  if (fittingSlots.length === 0) {
+    const maxFreeW = Math.max(
+      0,
+      ...openSlots.map((s) => s.capacityWeightKg - s.reservedWeightKg)
+    );
+    const maxFreeV = Math.max(
+      0,
+      ...openSlots.map((s) => s.capacityVolumeCbm - s.reservedVolumeCbm)
+    );
+    throw new HttpError(
+      409,
+      `Insufficient remaining capacity on ${params.serviceDate} (max single-pool available: ${maxFreeW.toFixed(
+        1
+      )} kg / ${maxFreeV.toFixed(2)} m³).`,
+      'SLOT_CAPACITY_EXCEEDED'
+    );
+  }
+
+  if (fittingSlots.length === 1) {
+    return fittingSlots[0];
+  }
+
+  const candidateIds = fittingSlots.map((s) => s._id);
+  const commitmentQuery = DriverSlotCommitment.find({
+    corridorId: params.corridorId,
+    slotId: { $in: candidateIds },
+    status: { $in: ['COMMITTED', 'LOCKED'] },
+  }).select('slotId');
+  const poolQuery = Pool.find({
+    corridorId: params.corridorId,
+    slotId: { $in: candidateIds },
+    status: 'OPEN',
+  }).select('slotId shipmentIds reservedWeightKg reservedVolumeCbm');
+
+  const [commitments, openPools] = await Promise.all([
+    (params.session ? commitmentQuery.session(params.session) : commitmentQuery).lean(),
+    (params.session ? poolQuery.session(params.session) : poolQuery).lean(),
+  ]);
+
+  const committedSlotIds = new Set(commitments.map((c) => String(c.slotId)));
+  const poolBySlotId = new Map(openPools.map((p) => [String(p.slotId), p]));
+
+  const ranked = fittingSlots
+    .map((slot) => {
+      const id = String(slot._id);
+      const hasCommittedDriver = committedSlotIds.has(id);
+      const existingPool = poolBySlotId.get(id);
+      const hasPooledShipments = Boolean(existingPool && existingPool.shipmentIds.length > 0);
+      const projectedUtilPct = Math.min(
+        100,
+        ((slot.reservedWeightKg + requiredWeight) / slot.capacityWeightKg) * 100
+      );
+      const score =
+        (hasCommittedDriver ? 1000 : 0) +
+        (hasPooledShipments ? 500 : 0) +
+        projectedUtilPct;
+
+      return { slot, score };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (
+        new Date(a.slot.plannedDepartureAt).getTime() -
+        new Date(b.slot.plannedDepartureAt).getTime()
+      );
+    });
+
+  return ranked[0].slot;
+}
 
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;
 
@@ -124,14 +269,14 @@ export async function createShipmentBooking(params: {
     }
   }
 
-  if (!isValidObjectId(input.corridorId) || !isValidObjectId(input.slotId)) {
-    throw new HttpError(400, 'Invalid corridorId or slotId', 'VALIDATION_ERROR');
+  if (!isValidObjectId(input.corridorId)) {
+    throw new HttpError(400, 'Invalid corridorId', 'VALIDATION_ERROR');
+  }
+  if (input.slotId && !isValidObjectId(input.slotId)) {
+    throw new HttpError(400, 'Invalid slotId', 'VALIDATION_ERROR');
   }
 
-  const [corridor, slot] = await Promise.all([
-    Corridor.findById(input.corridorId),
-    Slot.findById(input.slotId),
-  ]);
+  const corridor = await Corridor.findById(input.corridorId);
 
   if (!corridor) {
     throw new HttpError(404, 'Corridor not found', 'CORRIDOR_NOT_FOUND');
@@ -141,25 +286,6 @@ export async function createShipmentBooking(params: {
       409,
       `Corridor ${corridor.code} is inactive and cannot open new bookings or pooling.`,
       'CORRIDOR_INACTIVE'
-    );
-  }
-  if (!slot || !slot.corridorId.equals(corridor._id)) {
-    throw new HttpError(404, 'Slot not found for the selected corridor', 'SLOT_NOT_FOUND');
-  }
-
-  if (slot.status !== 'OPEN') {
-    throw new HttpError(
-      409,
-      `Slot ${slot.slotCode} is ${slot.status} and no longer accepting bookings.`,
-      'SLOT_NOT_OPEN'
-    );
-  }
-
-  if (now >= slot.cutoffAt) {
-    throw new HttpError(
-      409,
-      `Booking cutoff has passed for slot ${slot.slotCode}. Please select a later departure slot.`,
-      'CUTOFF_PASSED'
     );
   }
 
@@ -201,20 +327,54 @@ export async function createShipmentBooking(params: {
     weightUnit: input.cargo.weightUnit as WeightUnit,
   });
 
-  const remainingWeight = slot.capacityWeightKg - slot.reservedWeightKg;
-  const remainingVolume = slot.capacityVolumeCbm - slot.reservedVolumeCbm;
+  let slot: ISlot | null = null;
+  if (input.slotId) {
+    slot = await Slot.findById(input.slotId);
+    if (!slot || !slot.corridorId.equals(corridor._id)) {
+      throw new HttpError(404, 'Slot not found for the selected corridor', 'SLOT_NOT_FOUND');
+    }
+    if (slot.status !== 'OPEN') {
+      throw new HttpError(
+        409,
+        `Pool is ${slot.status} and no longer accepting bookings.`,
+        'SLOT_NOT_OPEN'
+      );
+    }
+    if (now >= slot.cutoffAt) {
+      const dateLabel = toServiceDateKey(slot.departureDate || slot.plannedDepartureAt);
+      throw new HttpError(
+        409,
+        `Booking cutoff has passed for ${
+          dateLabel ? `service date ${dateLabel}` : `slot ${slot.slotCode}`
+        }. Please choose an upcoming service date.`,
+        'CUTOFF_PASSED'
+      );
+    }
 
-  if (
-    cargoMetrics.chargeableWeightKg > remainingWeight ||
-    cargoMetrics.totalVolumeCbm > remainingVolume
-  ) {
-    throw new HttpError(
-      409,
-      `Insufficient remaining capacity in slot ${slot.slotCode} (available: ${remainingWeight.toFixed(
-        1
-      )} kg / ${remainingVolume.toFixed(2)} m³).`,
-      'SLOT_CAPACITY_EXCEEDED'
-    );
+    const remainingWeight = slot.capacityWeightKg - slot.reservedWeightKg;
+    const remainingVolume = slot.capacityVolumeCbm - slot.reservedVolumeCbm;
+    if (
+      cargoMetrics.chargeableWeightKg > remainingWeight ||
+      cargoMetrics.totalVolumeCbm > remainingVolume
+    ) {
+      throw new HttpError(
+        409,
+        `Insufficient remaining capacity (available: ${remainingWeight.toFixed(
+          1
+        )} kg / ${remainingVolume.toFixed(2)} m³).`,
+        'SLOT_CAPACITY_EXCEEDED'
+      );
+    }
+  } else if (input.serviceDate) {
+    slot = await matchOperationalSlotForBooking({
+      corridorId: corridor._id,
+      serviceDate: input.serviceDate,
+      chargeableWeightKg: cargoMetrics.chargeableWeightKg,
+      volumeCbm: cargoMetrics.totalVolumeCbm,
+      now,
+    });
+  } else {
+    throw new HttpError(400, 'serviceDate is required for booking', 'VALIDATION_ERROR');
   }
 
   const shipment = await Shipment.create({

@@ -5,12 +5,15 @@ import { Shipment } from '../models/Shipment.js';
 import { Slot, type ISlot } from '../models/Slot.js';
 import { parseCsv, serializeCsv } from '../utils/csv.js';
 import { HttpError } from '../utils/errors.js';
-import { createShipmentBooking } from './shipmentService.js';
+import {
+  createShipmentBooking,
+  matchOperationalSlotForBooking,
+} from './shipmentService.js';
 
 export const CSV_TEMPLATE_HEADERS = [
   'externalOrderRef',
   'corridorCode',
-  'slotCode',
+  'serviceDate',
   'pickupStopCode',
   'deliveryStopCode',
   'recipientName',
@@ -35,11 +38,11 @@ export const CSV_TEMPLATE_HEADERS = [
   'paymentChoice',
 ];
 
-export function buildCsvTemplate(sampleSlotCode = 'GJ-VAD-AMD-01-YYYY-MM-DD-AM'): string {
+export function buildCsvTemplate(sampleServiceDate = '2026-12-01'): string {
   const sampleRow: Record<string, unknown> = {
     externalOrderRef: 'ORD-1001',
     corridorCode: 'GJ-VAD-AMD-01',
-    slotCode: sampleSlotCode,
+    serviceDate: sampleServiceDate,
     pickupStopCode: 'VAD',
     deliveryStopCode: 'ANA',
     recipientName: 'Anand Yarn Traders',
@@ -67,11 +70,17 @@ export function buildCsvTemplate(sampleSlotCode = 'GJ-VAD-AMD-01-YYYY-MM-DD-AM')
   return serializeCsv(CSV_TEMPLATE_HEADERS, [sampleRow]);
 }
 
-const csvRowSchema = z.object({
-  externalOrderRef: z.string().trim().min(1, 'externalOrderRef is required').max(80),
-  corridorCode: z.string().trim().min(2).toUpperCase(),
-  slotCode: z.string().trim().min(2).toUpperCase(),
-  pickupStopCode: z.string().trim().min(2).toUpperCase(),
+const csvRowSchema = z
+  .object({
+    externalOrderRef: z.string().trim().min(1, 'externalOrderRef is required').max(80),
+    corridorCode: z.string().trim().min(2).toUpperCase(),
+    serviceDate: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'serviceDate must be YYYY-MM-DD')
+      .optional(),
+    slotCode: z.string().trim().min(2).toUpperCase().optional(),
+    pickupStopCode: z.string().trim().min(2).toUpperCase(),
   deliveryStopCode: z.string().trim().min(2).toUpperCase(),
   recipientName: z.string().trim().min(2, 'recipientName is required'),
   recipientPhone: z.string().trim().min(8, 'recipientPhone is required'),
@@ -104,7 +113,11 @@ const csvRowSchema = z.object({
   paymentChoice: z
     .enum(['TOKEN_PLUS_PICKUP_BALANCE', 'FULL_PREPAID'])
     .default('TOKEN_PLUS_PICKUP_BALANCE'),
-});
+})
+  .refine((d) => Boolean(d.serviceDate || d.slotCode), {
+    message: 'serviceDate is required',
+    path: ['serviceDate'],
+  });
 
 export interface CsvImportReport {
   summary: {
@@ -146,8 +159,15 @@ export async function importShipmentsFromCsv(params: {
   }
 
   const missingHeaders = CSV_TEMPLATE_HEADERS.filter(
-    (h) => h !== 'deliveryLandmark' && h !== 'handlingNotes' && !parsed.headers.includes(h)
+    (h) =>
+      h !== 'deliveryLandmark' &&
+      h !== 'handlingNotes' &&
+      h !== 'serviceDate' &&
+      !parsed.headers.includes(h)
   );
+  if (!parsed.headers.includes('serviceDate') && !parsed.headers.includes('slotCode')) {
+    missingHeaders.push('serviceDate');
+  }
   if (missingHeaders.length > 0) {
     throw new HttpError(
       400,
@@ -224,7 +244,7 @@ export async function importShipmentsFromCsv(params: {
 
     const data = validated.data;
     const corridor = corridorByCode.get(data.corridorCode);
-    const slot = slotByCode.get(data.slotCode);
+    const slot = data.slotCode ? slotByCode.get(data.slotCode) : undefined;
 
     if (!corridor) {
       report.rejected.push({
@@ -234,13 +254,31 @@ export async function importShipmentsFromCsv(params: {
       });
       continue;
     }
-    if (!slot || !slot.corridorId.equals(corridor._id)) {
+
+    let matchedSlot = slot;
+    if (data.slotCode && (!slot || !slot.corridorId.equals(corridor._id))) {
       report.rejected.push({
         rowNumber: row.rowNumber,
         externalOrderRef: data.externalOrderRef,
-        errors: [`Open slot '${data.slotCode}' not found for corridor '${data.corridorCode}'`],
+        errors: [`Open pool '${data.slotCode}' not found for corridor '${data.corridorCode}'`],
       });
       continue;
+    }
+
+    if (!matchedSlot && data.serviceDate) {
+      try {
+        matchedSlot = await matchOperationalSlotForBooking({
+          corridorId: corridor._id,
+          serviceDate: data.serviceDate,
+        });
+      } catch (err) {
+        report.rejected.push({
+          rowNumber: row.rowNumber,
+          externalOrderRef: data.externalOrderRef,
+          errors: [err instanceof Error ? err.message : `No open pool for service date ${data.serviceDate}`],
+        });
+        continue;
+      }
     }
 
     if (dryRun) {
@@ -260,7 +298,8 @@ export async function importShipmentsFromCsv(params: {
         userId,
         input: {
           corridorId: String(corridor._id),
-          slotId: String(slot._id),
+          ...(data.serviceDate ? { serviceDate: data.serviceDate } : {}),
+          ...(data.slotCode && matchedSlot ? { slotId: String(matchedSlot._id) } : {}),
           pickupStopCode: data.pickupStopCode,
           deliveryStopCode: data.deliveryStopCode,
           deliveryAddress: {

@@ -16,28 +16,80 @@ const router = Router();
 
 router.use(requireAuth);
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  const isShipper = req.auth?.role === 'SHIPPER';
   const [pools, rules] = await Promise.all([
     Pool.find({ status: { $in: ['OPEN', 'LOCKING', 'LOCKED', 'AWAITING_VIABILITY_DECISION'] } })
-      .populate('corridorId', 'code name isEstablishedRoute viabilityThresholdPct baseRatePaisePerKg guaranteedCeilingPaisePerKg')
-      .populate('slotId', 'slotCode label cutoffAt plannedDepartureAt')
+      .populate(
+        'corridorId',
+        'code name isEstablishedRoute viabilityThresholdPct baseRatePaisePerKg guaranteedCeilingPaisePerKg'
+      )
+      .populate('slotId', 'slotCode slotNumber label departureDate cutoffAt plannedDepartureAt')
       .sort({ updatedAt: -1 }),
     getActivePricingRules(),
   ]);
 
   const poolIds = pools.map((p) => p._id);
-  const trips = await Trip.find({ poolId: { $in: poolIds } })
-    .populate('vehicleId', 'registrationNumber vehicleClass tier')
-    .lean();
+  const trips = isShipper
+    ? []
+    : await Trip.find({ poolId: { $in: poolIds } })
+        .populate('vehicleId', 'registrationNumber vehicleClass tier')
+        .lean();
   const tripByPoolId = new Map(trips.map((t) => [String(t.poolId), t]));
 
   const enriched = pools.map((pool) => {
     const corridor = pool.corridorId as unknown as ICorridor | null;
-    const live = corridor
-      ? buildPoolLiveEvent(pool, corridor, rules)
-      : null;
+    const live = corridor ? buildPoolLiveEvent(pool, corridor, rules) : null;
+    const baseObj = pool.toObject();
+    const slotObj = baseObj.slotId as unknown as {
+      _id?: unknown;
+      slotCode?: string;
+      slotNumber?: number;
+      label?: string;
+      departureDate?: Date;
+      cutoffAt?: Date;
+      plannedDepartureAt?: Date;
+    } | null;
+
+    if (isShipper) {
+      return {
+        _id: baseObj._id,
+        status: baseObj.status,
+        viabilityStatus: baseObj.viabilityStatus,
+        viabilityReason: baseObj.viabilityReason,
+        corridorId: corridor
+          ? {
+              _id: corridor._id,
+              code: corridor.code,
+              name: corridor.name,
+              guaranteedCeilingPaisePerKg: corridor.guaranteedCeilingPaisePerKg,
+            }
+          : undefined,
+        slotId: slotObj
+          ? {
+              _id: slotObj._id,
+              slotNumber: slotObj.slotNumber,
+              label: slotObj.label
+                ? slotObj.label.replace(/\s*[•-]\s*(?:Mandatory\s*)?(?:\d{2}:\d{2}\s*)?Return.*$/i, ')').trim().replace(/\)\)$/, ')')
+                : undefined,
+              departureDate: slotObj.departureDate,
+              cutoffAt: slotObj.cutoffAt,
+              plannedDepartureAt: slotObj.plannedDepartureAt,
+            }
+          : undefined,
+        liveMetrics: live
+          ? {
+              ...live,
+              // Omit Base Pool (0-39%) label when no pool discount applies
+              appliedTierLabel:
+                live.appliedTierLabel.startsWith('Base Pool') ? undefined : live.appliedTierLabel,
+            }
+          : null,
+      };
+    }
+
     return {
-      ...pool.toObject(),
+      ...baseObj,
       liveMetrics: live,
       trip: tripByPoolId.get(String(pool._id)) ?? null,
     };
@@ -45,13 +97,13 @@ router.get('/', async (_req, res) => {
 
   res.json({
     success: true,
-    pricingVersion: rules.version,
-    discountTiers: rules.discountTiers,
+    ...(isShipper ? {} : { pricingVersion: rules.version, discountTiers: rules.discountTiers }),
     pools: enriched,
   });
 });
 
 router.get('/:poolId', async (req, res) => {
+  const isShipper = req.auth?.role === 'SHIPPER';
   const poolId = Array.isArray(req.params.poolId)
     ? req.params.poolId[0]
     : req.params.poolId;
@@ -62,7 +114,7 @@ router.get('/:poolId', async (req, res) => {
   const [pool, rules] = await Promise.all([
     Pool.findById(poolId)
       .populate('corridorId', 'code name isEstablishedRoute viabilityThresholdPct baseRatePaisePerKg guaranteedCeilingPaisePerKg')
-      .populate('slotId', 'slotCode label cutoffAt plannedDepartureAt'),
+      .populate('slotId', 'slotCode slotNumber label departureDate cutoffAt plannedDepartureAt'),
     getActivePricingRules(),
   ]);
 
@@ -71,16 +123,25 @@ router.get('/:poolId', async (req, res) => {
   }
 
   const corridor = pool.corridorId as unknown as ICorridor | null;
+  const live = corridor ? buildPoolLiveEvent(pool, corridor, rules) : null;
   res.json({
     success: true,
     pool: {
-      ...pool.toObject(),
-      liveMetrics: corridor ? buildPoolLiveEvent(pool, corridor, rules) : null,
+      ...(isShipper
+        ? {
+            _id: pool._id,
+            status: pool.status,
+            viabilityStatus: pool.viabilityStatus,
+            corridorId: pool.corridorId,
+            slotId: pool.slotId,
+          }
+        : pool.toObject()),
+      liveMetrics: live,
     },
   });
 });
 
-router.post('/:poolId/cutoff', async (req, res) => {
+router.post('/:poolId/cutoff', requireRole('PLATFORM_OWNER'), async (req, res) => {
   const poolId = Array.isArray(req.params.poolId)
     ? req.params.poolId[0]
     : req.params.poolId;
@@ -111,7 +172,7 @@ router.post('/:poolId/cutoff', async (req, res) => {
   });
 });
 
-router.post('/:poolId/allocate', async (req, res) => {
+router.post('/:poolId/allocate', requireRole('PLATFORM_OWNER'), async (req, res) => {
   const poolId = Array.isArray(req.params.poolId)
     ? req.params.poolId[0]
     : req.params.poolId;
