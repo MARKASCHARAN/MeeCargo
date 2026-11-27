@@ -127,7 +127,7 @@ and indexes as features are implemented.
 -   [x] Multi-document financial/booking operations use transactions
     where supported; development setup documents replica-set
     requirements.
--   [ ] Seed script creates demo corridors, slots, vehicles and users. *(Implemented in `backend/src/seeds/seed.ts`; awaiting `MONGODB_URL` / running MongoDB instance to execute live against DB.)*
+-   [x] Seed script creates demo corridors, slots, vehicles and users. *(Verified live against MongoDB Atlas replica set via `npm run seed:reset`.)*
 
 ## MC-003 --- Build shared UI shell and route guards
 
@@ -462,7 +462,7 @@ payment simulation.
 -   [x] Refunds are recorded with references and reasons.
 -   [x] Pickup balance is calculated from final locked price minus token
     already paid.
--   [ ] QR scan at pickup can trigger a balance-payment request. *(Wired in Stages 7–8 with QR scanning and pickup collection UI.)*
+-   [x] QR scan at pickup can trigger a balance-payment request.
 -   [x] No UI claims a real UPI payment occurred when using simulation.
 -   [x] Payment and shipment state transitions are validated.
 
@@ -617,14 +617,14 @@ stops and shipment destinations.
 
 ### Acceptance criteria
 
--   [ ] Routing provider is configurable.
--   [ ] Road distances are used instead of straight-line distances for
+-   [x] Routing provider is configurable.
+-   [x] Road distances are used instead of straight-line distances for
     trip cost/route planning.
--   [ ] Matrix request handles provider limits and errors.
--   [ ] Cached matrices can be reused for stable corridor stops.
--   [ ] Missing route data causes a visible failure or fallback, not
+-   [x] Matrix request handles provider limits and errors.
+-   [x] Cached matrices can be reused for stable corridor stops.
+-   [x] Missing route data causes a visible failure or fallback, not
     invented distance values.
--   [ ] Demo mode has a deterministic fixture matrix.
+-   [x] Demo mode has a deterministic fixture matrix.
 
 ## MC-022 --- Build Python OR-Tools optimization service
 
@@ -647,17 +647,17 @@ and returns a route plan. Keep it independent and lightweight.
 
 ### Acceptance criteria
 
--   [ ] API accepts vehicles, shipment destinations, demands, time
+-   [x] API accepts vehicles, shipment destinations, demands, time
     windows and distance/time matrix.
--   [ ] API validates request data.
--   [ ] Uses OR-Tools VRP/CVRP or VRPTW as appropriate.
--   [ ] Returns ordered stops, assigned shipments, total distance and
+-   [x] API validates request data.
+-   [x] Uses OR-Tools VRP/CVRP or VRPTW as appropriate.
+-   [x] Returns ordered stops, assigned shipments, total distance and
     estimated duration.
--   [ ] Returns infeasible status when constraints cannot be satisfied.
--   [ ] Includes deterministic sample request/response fixtures.
--   [ ] Express can call the service and handle timeout/unavailable
+-   [x] Returns infeasible status when constraints cannot be satisfied.
+-   [x] Includes deterministic sample request/response fixtures.
+-   [x] Express can call the service and handle timeout/unavailable
     states.
--   [ ] No route is presented as optimized if the solver did not return
+-   [x] No route is presented as optimized if the solver did not return
     a valid solution.
 
 ## MC-023 --- Implement delivery stop ordering and LIFO loading sequence
@@ -672,14 +672,14 @@ loading sequence to reduce reshuffling.
 
 ### Acceptance criteria
 
--   [ ] Shipments are grouped by destination stop.
--   [ ] Furthest/later drop zone is loaded earlier.
--   [ ] Earliest drop zone is positioned for first access.
--   [ ] Loading sequence is displayed in the driver manifest.
--   [ ] Loading plan is consistent with route stop order.
--   [ ] Special handling and non-stackable cargo constraints are
+-   [x] Shipments are grouped by destination stop.
+-   [x] Furthest/later drop zone is loaded earlier.
+-   [x] Earliest drop zone is positioned for first access.
+-   [x] Loading sequence is displayed in the driver manifest.
+-   [x] Loading plan is consistent with route stop order.
+-   [x] Special handling and non-stackable cargo constraints are
     represented.
--   [ ] Any manual override is recorded.
+-   [x] Any manual override is recorded.
 
 ## MC-024 --- Build 2D truck-bed visualizer
 
@@ -694,17 +694,17 @@ engine.
 
 ### Acceptance criteria
 
--   [ ] Truck-bed dimensions are configurable per vehicle.
--   [ ] Cargo is represented using dimensions and destination zone.
--   [ ] Zones use consistent colors: B = green, C = yellow, D = red (or
+-   [x] Truck-bed dimensions are configurable per vehicle.
+-   [x] Cargo is represented using dimensions and destination zone.
+-   [x] Zones use consistent colors: B = green, C = yellow, D = red (or
     clearly labelled equivalent).
--   [ ] Loading sequence is visible.
--   [ ] Layout flags overflow or unplaced cargo.
--   [ ] Cargo can be selected to view shipment reference and
+-   [x] Loading sequence is visible.
+-   [x] Layout flags overflow or unplaced cargo.
+-   [x] Cargo can be selected to view shipment reference and
     destination.
--   [ ] Visualizer labels itself as a planning aid, not a certified
+-   [x] Visualizer labels itself as a planning aid, not a certified
     loading safety system.
--   [ ] Weight distribution and axle safety are not claimed as validated
+-   [x] Weight distribution and axle safety are not claimed as validated
     unless explicitly modelled.
 
 ## MC-025 --- Implement backhaul matching and early turnaround decision
@@ -719,15 +719,15 @@ capacity and compare repositioning cost with return-load contribution.
 
 ### Acceptance criteria
 
--   [ ] Backhaul requests have origin, destination, slot, cargo and
+-   [x] Backhaul requests have origin, destination, slot, cargo and
     capacity requirements.
--   [ ] Only confirmed/eligible requests count as revenue.
--   [ ] Engine calculates additional repositioning distance and cost.
--   [ ] Backhaul is selected only when operational constraints and
+-   [x] Only confirmed/eligible requests count as revenue.
+-   [x] Engine calculates additional repositioning distance and cost.
+-   [x] Backhaul is selected only when operational constraints and
     contribution rules pass.
--   [ ] If no viable backhaul exists, early turnaround can be proposed.
--   [ ] Tier 1 minimum guarantee remains included in trip economics.
--   [ ] Backhaul assignment does not conflict with the driver's schedule
+-   [x] If no viable backhaul exists, early turnaround can be proposed.
+-   [x] Tier 1 minimum guarantee remains included in trip economics.
+-   [x] Backhaul assignment does not conflict with the driver's schedule
     or next commitment.
 
 ------------------------------------------------------------------------
@@ -745,15 +745,15 @@ Build a mobile-first driver experience for assigned trips.
 
 ### Acceptance criteria
 
--   [ ] Driver sees assigned and upcoming trips.
--   [ ] Driver sees pickup and delivery stop sequence.
--   [ ] Driver sees shipment references, cargo details and handling
+-   [x] Driver sees assigned and upcoming trips.
+-   [x] Driver sees pickup and delivery stop sequence.
+-   [x] Driver sees shipment references, cargo details and handling
     notes.
--   [ ] Driver can start, pause (with reason) and complete trip.
--   [ ] Driver can navigate to a stop using an external maps link.
--   [ ] Driver can report vehicle breakdown, delay and other exceptions.
--   [ ] UI works at common mobile screen sizes.
--   [ ] Driver cannot access another driver's trip.
+-   [x] Driver can start, pause (with reason) and complete trip.
+-   [x] Driver can navigate to a stop using an external maps link.
+-   [x] Driver can report vehicle breakdown, delay and other exceptions. *(Full 10-case exception & reassignment workflow implemented in Stage 9 `MC-037`.)*
+-   [x] UI works at common mobile screen sizes.
+-   [x] Driver cannot access another driver's trip.
 
 ## MC-027 --- Implement shipment QR generation and scanning
 
@@ -767,14 +767,14 @@ against the trip manifest.
 
 ### Acceptance criteria
 
--   [ ] Each shipment has a unique, non-guessable QR identifier.
--   [ ] QR does not expose sensitive personal information.
--   [ ] Driver scans QR to verify shipment belongs to the assigned trip.
--   [ ] Duplicate scans are idempotent.
--   [ ] Wrong-trip shipment scans are rejected.
--   [ ] Pickup event records driver, trip, timestamp and location where
+-   [x] Each shipment has a unique, non-guessable QR identifier.
+-   [x] QR does not expose sensitive personal information.
+-   [x] Driver scans QR to verify shipment belongs to the assigned trip.
+-   [x] Duplicate scans are idempotent.
+-   [x] Wrong-trip shipment scans are rejected.
+-   [x] Pickup event records driver, trip, timestamp and location where
     available.
--   [ ] Scan works in the supported mobile browser environment.
+-   [x] Scan works in the supported mobile browser environment.
 
 ## MC-028 --- Implement trip status and delivery events
 
@@ -787,13 +787,13 @@ Track actual trip execution separately from the planned route.
 
 ### Acceptance criteria
 
--   [ ] Trip states are validated and transition in an allowed order.
--   [ ] Shipment states include pickup, in-transit, at-destination,
+-   [x] Trip states are validated and transition in an allowed order.
+-   [x] Shipment states include pickup, in-transit, at-destination,
     delivered, failed and returned/rescheduled as applicable.
--   [ ] Each event stores timestamp, actor and relevant metadata.
--   [ ] Planned route is preserved separately from actual events.
--   [ ] Repeated client requests do not create duplicate events.
--   [ ] Shipper tracking view updates as events arrive.
+-   [x] Each event stores timestamp, actor and relevant metadata.
+-   [x] Planned route is preserved separately from actual events.
+-   [x] Repeated client requests do not create duplicate events.
+-   [x] Shipper tracking view updates as events arrive.
 
 ## MC-029 --- Implement recipient public tracking page
 
@@ -807,15 +807,15 @@ Recipient does not need an account.
 
 ### Acceptance criteria
 
--   [ ] Tracking token is cryptographically random and unguessable.
--   [ ] Public API returns only fields safe for recipient visibility.
--   [ ] Recipient can see shipment status and estimated arrival window.
--   [ ] Recipient does not see other shippers' shipments or unrelated
+-   [x] Tracking token is cryptographically random and unguessable.
+-   [x] Public API returns only fields safe for recipient visibility.
+-   [x] Recipient can see shipment status and estimated arrival window.
+-   [x] Recipient does not see other shippers' shipments or unrelated
     cargo.
--   [ ] Driver's personal phone number and continuous precise location
+-   [x] Driver's personal phone number and continuous precise location
     are not exposed.
--   [ ] Token can be revoked or expired according to policy.
--   [ ] Page supports mobile browsers.
+-   [x] Token can be revoked or expired according to policy.
+-   [x] Page supports mobile browsers.
 
 ## MC-030 --- Implement delivery OTP and photo proof
 
@@ -828,16 +828,16 @@ Capture recipient confirmation and proof of delivery.
 
 ### Acceptance criteria
 
--   [ ] OTP is generated for the shipment/recipient delivery attempt.
--   [ ] OTP has expiry and attempt limits.
--   [ ] Driver submits OTP to confirm delivery.
--   [ ] Alternative confirmation path can be configured for B2B
+-   [x] OTP is generated for the shipment/recipient delivery attempt.
+-   [x] OTP has expiry and attempt limits.
+-   [x] Driver submits OTP to confirm delivery.
+-   [x] Alternative confirmation path can be configured for B2B
     warehouse/shop recipients where OTP is impractical.
--   [ ] Photo evidence can be uploaded.
--   [ ] Delivery event stores timestamp, actor and location where
+-   [x] Photo evidence can be uploaded.
+-   [x] Delivery event stores timestamp, actor and location where
     available.
--   [ ] Photo URL/access is protected and not publicly enumerable.
--   [ ] Failed verification does not mark shipment delivered.
+-   [x] Photo URL/access is protected and not publicly enumerable.
+-   [x] Failed verification does not mark shipment delivered.
 
 ## MC-031 --- Implement notifications
 
@@ -864,14 +864,14 @@ milestones.
 
 ### Acceptance criteria
 
--   [ ] Notification templates are configurable.
--   [ ] Notification provider is abstracted.
--   [ ] Development can use a console/mock provider.
--   [ ] Recipient gets a tracking link.
--   [ ] Notification failures do not corrupt shipment state.
--   [ ] Duplicate event delivery does not send uncontrolled duplicate
+-   [x] Notification templates are configurable.
+-   [x] Notification provider is abstracted.
+-   [x] Development can use a console/mock provider.
+-   [x] Recipient gets a tracking link.
+-   [x] Notification failures do not corrupt shipment state.
+-   [x] Duplicate event delivery does not send uncontrolled duplicate
     notifications.
--   [ ] SMS/WhatsApp integrations are clearly marked as unavailable when
+-   [x] SMS/WhatsApp integrations are clearly marked as unavailable when
     not configured.
 
 ## MC-032 --- Implement offline-first driver actions
@@ -886,16 +886,16 @@ connectivity.
 
 ### Acceptance criteria
 
--   [ ] Assigned trip and manifest can be cached before departure.
--   [ ] Driver can record supported status events offline.
--   [ ] Offline events are stored in IndexedDB.
--   [ ] Events sync when connectivity returns.
--   [ ] Sync uses idempotency keys.
--   [ ] Conflicts are surfaced rather than silently overwritten.
--   [ ] UI shows pending/synced/failed synchronization state.
--   [ ] QR verification and OTP delivery confirmation clearly indicate
+-   [x] Assigned trip and manifest can be cached before departure.
+-   [x] Driver can record supported status events offline.
+-   [x] Offline events are stored in IndexedDB.
+-   [x] Events sync when connectivity returns.
+-   [x] Sync uses idempotency keys.
+-   [x] Conflicts are surfaced rather than silently overwritten.
+-   [x] UI shows pending/synced/failed synchronization state.
+-   [x] QR verification and OTP delivery confirmation clearly indicate
     when online verification is required.
--   [ ] Location tracking is limited to active trips and disclosed to
+-   [x] Location tracking is limited to active trips and disclosed to
     the driver.
 
 ------------------------------------------------------------------------
@@ -913,13 +913,13 @@ Record remaining freight payment at pickup after final price lock.
 
 ### Acceptance criteria
 
--   [ ] Remaining balance equals locked price minus successful token
+-   [x] Remaining balance equals locked price minus successful token
     payment and valid adjustments.
--   [ ] Driver can initiate/record collection at pickup.
--   [ ] Payment method and provider reference are stored.
--   [ ] Collection state is distinct from customer payment settlement.
--   [ ] Duplicate collection requests are idempotent.
--   [ ] Simulated collections are visibly labelled as simulated.
+-   [x] Driver can initiate/record collection at pickup.
+-   [x] Payment method and provider reference are stored.
+-   [x] Collection state is distinct from customer payment settlement.
+-   [x] Duplicate collection requests are idempotent.
+-   [x] Simulated collections are visibly labelled as simulated.
 
 ## MC-034 --- Implement trip economics ledger
 
@@ -943,16 +943,16 @@ Calculate trip-level economics from recorded/configured values.
 
 ### Acceptance criteria
 
--   [ ] Every cost/revenue line has source and status (estimated or
+-   [x] Every cost/revenue line has source and status (estimated or
     actual).
--   [ ] Minimum Guarantee is included in the economics.
--   [ ] Unconfirmed backhaul revenue is excluded.
--   [ ] Platform contribution is calculated consistently.
--   [ ] Shipper sees only their own shipment charges and relevant
+-   [x] Minimum Guarantee is included in the economics.
+-   [x] Unconfirmed backhaul revenue is excluded.
+-   [x] Platform contribution is calculated consistently.
+-   [x] Shipper sees only their own shipment charges and relevant
     savings estimate.
--   [ ] Internal platform economics are not exposed to unrelated
+-   [x] Internal platform economics are not exposed to unrelated
     shippers.
--   [ ] Demo figures are labelled illustrative.
+-   [x] Demo figures are labelled illustrative.
 
 ## MC-035 --- Build shipper shipment dashboard and history
 
@@ -965,13 +965,13 @@ Provide a simple overview of a shipper's bookings and shipments.
 
 ### Acceptance criteria
 
--   [ ] Show upcoming, active, delivered, failed, cancelled and
+-   [x] Show upcoming, active, delivered, failed, cancelled and
     rolled-over shipments.
--   [ ] Filter by corridor, date and status.
--   [ ] Show shipment price breakdown and payment state.
--   [ ] Provide tracking links.
--   [ ] Provide shipment detail and proof-of-delivery summary.
--   [ ] Export shipment history to CSV.
+-   [x] Filter by corridor, date and status.
+-   [x] Show shipment price breakdown and payment state.
+-   [x] Provide tracking links.
+-   [x] Provide shipment detail and proof-of-delivery summary.
+-   [x] Export shipment history to CSV.
 
 ## MC-036 --- Build operational impact and utilization metrics
 
@@ -998,11 +998,11 @@ Display trip and platform metrics based on real calculation inputs.
 
 ### Acceptance criteria
 
--   [ ] Weight and volume utilization are separate.
--   [ ] Baseline methodology is visible.
--   [ ] Estimated values are labelled estimated.
--   [ ] No hardcoded 35--50% saving claim is presented as measured fact.
--   [ ] Metrics can be traced to trips and shipment records.
+-   [x] Weight and volume utilization are separate.
+-   [x] Baseline methodology is visible.
+-   [x] Estimated values are labelled estimated.
+-   [x] No hardcoded 35--50% saving claim is presented as measured fact.
+-   [x] Metrics can be traced to trips and shipment records.
 
 ------------------------------------------------------------------------
 
@@ -1032,16 +1032,16 @@ Handle real-world disruptions without losing shipment accountability.
 
 ### Acceptance criteria
 
--   [ ] Driver can report an exception with reason and optional
+-   [x] Driver can report an exception with reason and optional
     evidence.
--   [ ] Shipment is not silently marked delivered or discarded.
--   [ ] Relevant shipper is notified.
--   [ ] Reschedule, return or reallocation options are represented as
+-   [x] Shipment is not silently marked delivered or discarded.
+-   [x] Relevant shipper is notified.
+-   [x] Reschedule, return or reallocation options are represented as
     explicit state transitions.
--   [ ] Vehicle breakdown can trigger reassignment of remaining
+-   [x] Vehicle breakdown can trigger reassignment of remaining
     shipments where feasible.
--   [ ] Any changed route is recalculated and recorded.
--   [ ] Every exception has a timestamp and actor.
+-   [x] Any changed route is recalculated and recorded.
+-   [x] Every exception has a timestamp and actor.
 
 ## MC-038 --- Implement access control and data privacy safeguards
 
@@ -1050,15 +1050,15 @@ Handle real-world disruptions without losing shipment accountability.
 
 ### Acceptance criteria
 
--   [ ] All shipper data queries enforce business ownership.
--   [ ] Public tracking endpoints return minimal fields.
--   [ ] Tracking tokens are not sequential IDs.
--   [ ] Driver location is shared only during active assigned trips and
+-   [x] All shipper data queries enforce business ownership.
+-   [x] Public tracking endpoints return minimal fields.
+-   [x] Tracking tokens are not sequential IDs.
+-   [x] Driver location is shared only during active assigned trips and
     according to disclosed policy.
--   [ ] Payment references and personal data are not exposed in logs.
--   [ ] Uploads validate file type and size.
--   [ ] Secrets are stored in environment variables.
--   [ ] Rate limits protect login, OTP and public tracking endpoints.
+-   [x] Payment references and personal data are not exposed in logs.
+-   [x] Uploads validate file type and size.
+-   [x] Secrets are stored in environment variables.
+-   [x] Rate limits protect login, OTP and public tracking endpoints.
 
 ------------------------------------------------------------------------
 
@@ -1086,17 +1086,17 @@ proposition.
 
 ### Acceptance criteria
 
--   [ ] Demo can be reset and replayed.
--   [ ] Adding shippers visibly changes pool utilization and projected
+-   [x] Demo can be reset and replayed.
+-   [x] Adding shippers visibly changes pool utilization and projected
     price.
--   [ ] Cutoff locks the pool and final pricing.
--   [ ] Vehicle allocation uses actual capacity and configured policy.
--   [ ] Route optimization returns a valid stop order.
--   [ ] Truck-bed visualizer shows destination zones.
--   [ ] Driver can scan/verify pickup and update trip.
--   [ ] Recipient tracking page reflects trip progress.
--   [ ] Trip economics are calculated from demo inputs.
--   [ ] No demo metric is presented as real-world measured performance.
+-   [x] Cutoff locks the pool and final pricing.
+-   [x] Vehicle allocation uses actual capacity and configured policy.
+-   [x] Route optimization returns a valid stop order.
+-   [x] Truck-bed visualizer shows destination zones.
+-   [x] Driver can scan/verify pickup and update trip.
+-   [x] Recipient tracking page reflects trip progress.
+-   [x] Trip economics are calculated from demo inputs.
+-   [x] No demo metric is presented as real-world measured performance.
 
 ## MC-040 --- Add core automated tests
 
@@ -1105,18 +1105,18 @@ proposition.
 
 ### Acceptance criteria
 
--   [ ] Unit tests for chargeable-weight calculation.
--   [ ] Unit tests for pricing tiers and anchor discount.
--   [ ] Tests for price ceiling and paise rounding.
--   [ ] Tests for pool capacity and concurrent booking protection.
--   [ ] Tests for cutoff locking idempotency.
--   [ ] Tests for vehicle weight/volume feasibility.
--   [ ] Tests for low-utilization rollover/refund.
--   [ ] Tests for role and business data isolation.
--   [ ] Tests for trip and shipment state transitions.
--   [ ] Tests for duplicate QR scans/payment callbacks.
--   [ ] Integration test for Express-to-optimizer request/response.
--   [ ] One end-to-end test covering booking to recipient tracking.
+-   [x] Unit tests for chargeable-weight calculation.
+-   [x] Unit tests for pricing tiers and anchor discount.
+-   [x] Tests for price ceiling and paise rounding.
+-   [x] Tests for pool capacity and concurrent booking protection.
+-   [x] Tests for cutoff locking idempotency.
+-   [x] Tests for vehicle weight/volume feasibility.
+-   [x] Tests for low-utilization rollover/refund.
+-   [x] Tests for role and business data isolation.
+-   [x] Tests for trip and shipment state transitions.
+-   [x] Tests for duplicate QR scans/payment callbacks.
+-   [x] Integration test for Express-to-optimizer request/response.
+-   [x] One end-to-end test covering booking to recipient tracking.
 
 ## MC-041 --- Prepare local run and demo documentation
 
@@ -1125,14 +1125,14 @@ proposition.
 
 ### Acceptance criteria
 
--   [ ] README lists prerequisites and environment variables.
--   [ ] MongoDB setup and seed instructions are documented.
--   [ ] Frontend, backend and optimizer run commands are documented.
--   [ ] Demo accounts and scenario reset instructions are documented.
--   [ ] External services that are mocked/simulated are explicitly
+-   [x] README lists prerequisites and environment variables.
+-   [x] MongoDB setup and seed instructions are documented.
+-   [x] Frontend, backend and optimizer run commands are documented.
+-   [x] Demo accounts and scenario reset instructions are documented.
+-   [x] External services that are mocked/simulated are explicitly
     listed.
--   [ ] Known limitations are documented.
--   [ ] No unsupported claims about real payment, routing, city-entry or
+-   [x] Known limitations are documented.
+-   [x] No unsupported claims about real payment, routing, city-entry or
     emissions integrations.
 
 ------------------------------------------------------------------------

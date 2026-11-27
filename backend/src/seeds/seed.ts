@@ -1,16 +1,64 @@
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { connectDatabase, disconnectDatabase } from '../config/database.js';
+import { BackhaulRequest } from '../models/BackhaulRequest.js';
 import { BusinessProfile } from '../models/BusinessProfile.js';
 import { Corridor } from '../models/Corridor.js';
+import { DeliveryProof } from '../models/DeliveryProof.js';
 import { DriverProfile } from '../models/DriverProfile.js';
+import { ExceptionEvent } from '../models/ExceptionEvent.js';
+import { NotificationLog } from '../models/NotificationLog.js';
+import { Payment } from '../models/Payment.js';
+import { PickupCollection } from '../models/PickupCollection.js';
+import { Pool } from '../models/Pool.js';
 import { PricingConfig } from '../models/PricingConfig.js';
+import { RouteMatrixCache } from '../models/RouteMatrixCache.js';
+import { Shipment } from '../models/Shipment.js';
 import { Slot } from '../models/Slot.js';
 import { Trip } from '../models/Trip.js';
+import { TripEvent } from '../models/TripEvent.js';
+import { TripLedger } from '../models/TripLedger.js';
 import { User, type IUser } from '../models/User.js';
 import { Vehicle } from '../models/Vehicle.js';
-import { DEFAULT_PRICING_RULES } from '../services/pricingEngine.js';
+import { calculateCargoMetrics } from '../services/cargoCalculator.js';
+import {
+  calculateDeterministicPrice,
+  DEFAULT_PRICING_RULES,
+} from '../services/pricingEngine.js';
 
-export async function seedDatabase() {
+export interface SeedOptions {
+  reset?: boolean;
+}
+
+export async function resetDemoState(): Promise<void> {
+  await Promise.all([
+    DeliveryProof.deleteMany({}),
+    PickupCollection.deleteMany({}),
+    TripLedger.deleteMany({}),
+    ExceptionEvent.deleteMany({}),
+    TripEvent.deleteMany({}),
+    NotificationLog.deleteMany({}),
+    Payment.deleteMany({}),
+    Trip.deleteMany({}),
+    Pool.deleteMany({}),
+    Shipment.deleteMany({}),
+    RouteMatrixCache.deleteMany({}),
+    Slot.deleteMany({}),
+    BackhaulRequest.deleteMany({}),
+  ]);
+  await Promise.all([
+    Shipment.syncIndexes(),
+    Payment.syncIndexes(),
+    PickupCollection.syncIndexes(),
+    TripEvent.syncIndexes(),
+  ]);
+}
+
+export async function seedDatabase(options: SeedOptions = {}) {
+  if (options.reset) {
+    await resetDemoState();
+  }
+
   await PricingConfig.findOneAndUpdate(
     { version: DEFAULT_PRICING_RULES.version },
     {
@@ -37,6 +85,14 @@ export async function seedDatabase() {
       name: 'Mahesh Desai',
       email: 'shipper2@meecargo.demo',
       phone: '+919800000102',
+      role: 'SHIPPER' as const,
+      passwordHash,
+      isActive: true,
+    },
+    {
+      name: 'Bhavesh Prajapati',
+      email: 'shipper3@meecargo.demo',
+      phone: '+919800000103',
       role: 'SHIPPER' as const,
       passwordHash,
       isActive: true,
@@ -73,6 +129,7 @@ export async function seedDatabase() {
 
   const shipper1 = userMap.get('shipper1@meecargo.demo')!;
   const shipper2 = userMap.get('shipper2@meecargo.demo')!;
+  const shipper3 = userMap.get('shipper3@meecargo.demo')!;
   const driver1 = userMap.get('driver1@meecargo.demo')!;
   const driver2 = userMap.get('driver2@meecargo.demo')!;
 
@@ -154,8 +211,46 @@ export async function seedDatabase() {
     { upsert: true, returnDocument: 'after', runValidators: true }
   );
 
-  await User.updateOne({ _id: shipper1._id }, { $set: { businessId: business1._id } });
-  await User.updateOne({ _id: shipper2._id }, { $set: { businessId: business2._id } });
+  const business3 = await BusinessProfile.findOneAndUpdate(
+    { ownerId: shipper3._id },
+    {
+      $set: {
+        businessName: 'Kheda Ceramic & Hardware',
+        businessType: 'WHOLESALER',
+        contactName: 'Bhavesh Prajapati',
+        contactPhone: '+919800000103',
+        contactEmail: 'shipper3@meecargo.demo',
+        pickupAddress: {
+          addressLine: 'Shed 7, Savli Crossing Hub',
+          villageOrTown: 'Vadodara',
+          district: 'Vadodara',
+          state: 'Gujarat',
+          pincode: '390022',
+          landmark: 'Near Ring Road Circle',
+          location: { type: 'Point', coordinates: [73.191, 22.299] },
+        },
+        serviceLocations: [
+          {
+            label: 'Sarkhej Timber & Tile Market',
+            villageOrTown: 'Ahmedabad',
+            district: 'Ahmedabad',
+            state: 'Gujarat',
+            pincode: '382210',
+          },
+        ],
+        ownerId: shipper3._id,
+        memberUserIds: [shipper3._id],
+        isActive: true,
+      },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+
+  await Promise.all([
+    User.updateOne({ _id: shipper1._id }, { $set: { businessId: business1._id } }),
+    User.updateOne({ _id: shipper2._id }, { $set: { businessId: business2._id } }),
+    User.updateOne({ _id: shipper3._id }, { $set: { businessId: business3._id } }),
+  ]);
 
   const corridor = await Corridor.findOneAndUpdate(
     { code: 'GJ-VAD-AMD-01' },
@@ -276,6 +371,9 @@ export async function seedDatabase() {
     seededSlots.push(doc);
   }
 
+  const morningSlot = seededSlots[0];
+  const eveningSlot = seededSlots[1];
+
   const vehicles = [
     {
       registrationNumber: 'GJ-06-MC-1001',
@@ -332,6 +430,7 @@ export async function seedDatabase() {
     {
       registrationNumber: 'GJ-01-BH-3099',
       operatorName: 'Sabarmati Return Haul Partner',
+      driverId: driver2._id,
       tier: 'TIER_3' as const,
       vehicleClass: '17ft Backhaul Truck',
       maxWeightKg: 4000,
@@ -402,35 +501,376 @@ export async function seedDatabase() {
     { upsert: true, returnDocument: 'after', runValidators: true }
   );
 
-  await Trip.findOneAndUpdate(
-    { tripCode: `MC-TRIP-${datePrefix}-001` },
+  // Pre-seed two paid shipments into the open Morning (AM) pool + one locked PM shipment for Driver execution
+  const trackingTokens: Record<string, string> = {};
+  const existingPool = await Pool.findOne({ slotId: morningSlot._id });
+
+  if (!existingPool) {
+    const cargo1 = calculateCargoMetrics({
+      category: 'TEXTILE_ROLL',
+      quantity: 12,
+      length: 120,
+      width: 35,
+      height: 35,
+      dimensionUnit: 'CM',
+      unitActualWeight: 32,
+      weightUnit: 'KG',
+      volumetricDivisor: 5000,
+    });
+    const cargo2 = calculateCargoMetrics({
+      category: 'SACK_BAG',
+      quantity: 10,
+      length: 70,
+      width: 45,
+      height: 30,
+      dimensionUnit: 'CM',
+      unitActualWeight: 55,
+      weightUnit: 'KG',
+      volumetricDivisor: 5000,
+    });
+    const cargo3 = calculateCargoMetrics({
+      category: 'PALLET_BUNDLE',
+      quantity: 2,
+      length: 120,
+      width: 100,
+      height: 85,
+      dimensionUnit: 'CM',
+      unitActualWeight: 220,
+      weightUnit: 'KG',
+      volumetricDivisor: 5000,
+    });
+
+    const totalMorningWt = cargo1.chargeableWeightKg + cargo2.chargeableWeightKg;
+    const totalMorningVol = Number((cargo1.totalVolumeCbm + cargo2.totalVolumeCbm).toFixed(4));
+    const morningWtPct = (totalMorningWt / morningSlot.capacityWeightKg) * 100;
+    const morningVolPct = (totalMorningVol / morningSlot.capacityVolumeCbm) * 100;
+
+    const p1 = calculateDeterministicPrice({
+      chargeableWeightKg: cargo1.chargeableWeightKg,
+      baseRatePaisePerKg: corridor.baseRatePaisePerKg,
+      guaranteedCeilingPaisePerKg: corridor.guaranteedCeilingPaisePerKg,
+      weightUtilizationPct: morningWtPct,
+      volumeUtilizationPct: morningVolPct,
+      isAnchorEligible: true,
+      rules: DEFAULT_PRICING_RULES,
+    });
+    const p2 = calculateDeterministicPrice({
+      chargeableWeightKg: cargo2.chargeableWeightKg,
+      baseRatePaisePerKg: corridor.baseRatePaisePerKg,
+      guaranteedCeilingPaisePerKg: corridor.guaranteedCeilingPaisePerKg,
+      weightUtilizationPct: morningWtPct,
+      volumeUtilizationPct: morningVolPct,
+      isAnchorEligible: false,
+      rules: DEFAULT_PRICING_RULES,
+    });
+    const p3 = calculateDeterministicPrice({
+      chargeableWeightKg: cargo3.chargeableWeightKg,
+      baseRatePaisePerKg: corridor.baseRatePaisePerKg,
+      guaranteedCeilingPaisePerKg: corridor.guaranteedCeilingPaisePerKg,
+      weightUtilizationPct: 35,
+      volumeUtilizationPct: 30,
+      isAnchorEligible: false,
+      rules: DEFAULT_PRICING_RULES,
+    });
+
+    const poolAm = await Pool.create({
+      poolCode: `POOL-${morningSlot.slotCode}`,
+      corridorId: corridor._id,
+      slotId: morningSlot._id,
+      status: 'OPEN',
+      capacityWeightKg: morningSlot.capacityWeightKg,
+      capacityVolumeCbm: morningSlot.capacityVolumeCbm,
+      reservedWeightKg: totalMorningWt,
+      reservedVolumeCbm: totalMorningVol,
+      shipmentIds: [],
+      viabilityStatus: 'PENDING',
+    });
+
+    const tok1 = crypto.randomBytes(24).toString('hex');
+    const tok2 = crypto.randomBytes(24).toString('hex');
+    const tok3 = crypto.randomBytes(24).toString('hex');
+    trackingTokens['MC-DEMO-001'] = tok1;
+    trackingTokens['MC-DEMO-002'] = tok2;
+    trackingTokens['MC-DEMO-003'] = tok3;
+
+    const ship1 = await Shipment.create({
+      reference: `MC-DEMO-${datePrefix.replace(/-/g, '')}-01`,
+      businessId: business1._id,
+      createdByUserId: shipper1._id,
+      corridorId: corridor._id,
+      slotId: morningSlot._id,
+      poolId: poolAm._id,
+      pickupStopCode: 'VAD',
+      pickupStopOrder: 0,
+      deliveryStopCode: 'ANA',
+      deliveryStopOrder: 1,
+      pickupAddress: business1.pickupAddress,
+      deliveryAddress: {
+        addressLine: 'Plot 14, Anand GIDC Phase II',
+        villageOrTown: 'Anand',
+        district: 'Anand',
+        state: 'Gujarat',
+        pincode: '388001',
+        landmark: 'Near Vitthal Udyognagar',
+        location: { type: 'Point', coordinates: [72.9289, 22.5645] },
+      },
+      recipientName: 'Anand Weaving Works',
+      recipientPhone: '+919800000301',
+      cargo: {
+        category: 'TEXTILE_ROLL',
+        quantity: 12,
+        unitDimensionsCm: cargo1.unitDimensionsCm,
+        unitActualWeightKg: 32,
+        totalActualWeightKg: cargo1.totalActualWeightKg,
+        volumetricDivisor: 5000,
+        volumetricWeightKg: cargo1.totalVolumetricWeightKg,
+        chargeableWeightKg: cargo1.chargeableWeightKg,
+        billingBasis: cargo1.billingBasis,
+        volumeCbm: cargo1.totalVolumeCbm,
+        stackable: false,
+        handlingRestrictions: ['KEEP_DRY'],
+        declaredContents: '12 Dyed Cotton Textile Rolls',
+      },
+      tokenStatus: 'PAID',
+      status: 'POOLED',
+      pricingSnapshot: {
+        pricingVersion: p1.pricingVersion,
+        ceilingPricePaise: p1.ceilingPricePaise,
+        projectedPricePaise: p1.computedPricePaise,
+        tokenAmountPaise: p1.tokenAmountPaise,
+        tokenPaidPaise: p1.tokenAmountPaise,
+        remainingBalancePaise: p1.computedPricePaise - p1.tokenAmountPaise,
+        isAnchorEligible: true,
+        poolDiscountPaise: p1.poolDiscountPaise,
+        anchorDiscountPaise: p1.anchorDiscountPaise,
+        handlingFeePaise: p1.handlingFeePaise,
+      },
+      trackingToken: tok1,
+      qrToken: `MCR_${crypto.randomBytes(12).toString('hex')}`,
+      statusHistory: [{ status: 'POOLED', at: now, note: 'Seeded into AM demo pool' }],
+    });
+
+    const ship2 = await Shipment.create({
+      reference: `MC-DEMO-${datePrefix.replace(/-/g, '')}-02`,
+      businessId: business2._id,
+      createdByUserId: shipper2._id,
+      corridorId: corridor._id,
+      slotId: morningSlot._id,
+      poolId: poolAm._id,
+      pickupStopCode: 'VAD',
+      pickupStopOrder: 0,
+      deliveryStopCode: 'NAD',
+      deliveryStopOrder: 2,
+      pickupAddress: business2.pickupAddress,
+      deliveryAddress: {
+        addressLine: 'Godown 5, Station Road Market',
+        villageOrTown: 'Nadiad',
+        district: 'Kheda',
+        state: 'Gujarat',
+        pincode: '387001',
+        landmark: 'Near Agricultural Produce Market',
+        location: { type: 'Point', coordinates: [72.8634, 22.6916] },
+      },
+      recipientName: 'Charotar Grain Traders',
+      recipientPhone: '+919800000302',
+      cargo: {
+        category: 'SACK_BAG',
+        quantity: 10,
+        unitDimensionsCm: cargo2.unitDimensionsCm,
+        unitActualWeightKg: 55,
+        totalActualWeightKg: cargo2.totalActualWeightKg,
+        volumetricDivisor: 5000,
+        volumetricWeightKg: cargo2.totalVolumetricWeightKg,
+        chargeableWeightKg: cargo2.chargeableWeightKg,
+        billingBasis: cargo2.billingBasis,
+        volumeCbm: cargo2.totalVolumeCbm,
+        stackable: true,
+        handlingRestrictions: [],
+        declaredContents: '10 Grain & Pulse Sacks',
+      },
+      tokenStatus: 'PAID',
+      status: 'POOLED',
+      pricingSnapshot: {
+        pricingVersion: p2.pricingVersion,
+        ceilingPricePaise: p2.ceilingPricePaise,
+        projectedPricePaise: p2.computedPricePaise,
+        tokenAmountPaise: p2.tokenAmountPaise,
+        tokenPaidPaise: p2.tokenAmountPaise,
+        remainingBalancePaise: p2.computedPricePaise - p2.tokenAmountPaise,
+        isAnchorEligible: false,
+        poolDiscountPaise: p2.poolDiscountPaise,
+        anchorDiscountPaise: 0,
+        handlingFeePaise: p2.handlingFeePaise,
+      },
+      trackingToken: tok2,
+      qrToken: `MCR_${crypto.randomBytes(12).toString('hex')}`,
+      statusHistory: [{ status: 'POOLED', at: now, note: 'Seeded into AM demo pool' }],
+    });
+
+    poolAm.shipmentIds = [ship1._id, ship2._id];
+    poolAm.anchorShipmentId = ship1._id;
+    await poolAm.save();
+
+    await Slot.updateOne(
+      { _id: morningSlot._id },
+      { $set: { reservedWeightKg: totalMorningWt, reservedVolumeCbm: totalMorningVol } }
+    );
+
+    const pmTrip = await Trip.create({
+      tripCode: `MC-TRIP-${datePrefix}-PM1`,
+      corridorId: corridor._id,
+      slotId: eveningSlot._id,
+      vehicleId: tier1Vehicle._id,
+      driverId: driver1._id,
+      shipmentIds: [],
+      status: 'ASSIGNED',
+      plannedDepartureAt: eveningDeparture,
+      estimatedEndAt: eveningArrEnd,
+      stopsSummary: corridor.stops.map((s) => ({
+        stopCode: s.stopCode,
+        name: s.name,
+        sequenceOrder: s.sequenceOrder,
+      })),
+      notes: 'Demo executable PM corridor trip (Tier 1 attached vehicle)',
+    });
+
+    const ship3 = await Shipment.create({
+      reference: `MC-DEMO-${datePrefix.replace(/-/g, '')}-03`,
+      businessId: business3._id,
+      createdByUserId: shipper3._id,
+      corridorId: corridor._id,
+      slotId: eveningSlot._id,
+      tripId: pmTrip._id,
+      pickupStopCode: 'VAD',
+      pickupStopOrder: 0,
+      deliveryStopCode: 'AMD',
+      deliveryStopOrder: 3,
+      pickupAddress: business3.pickupAddress,
+      deliveryAddress: {
+        addressLine: 'Plot 88, Sarkhej Industrial Zone',
+        villageOrTown: 'Ahmedabad',
+        district: 'Ahmedabad',
+        state: 'Gujarat',
+        pincode: '382210',
+        landmark: 'Near Sarkhej Overbridge',
+        location: { type: 'Point', coordinates: [72.5714, 23.0225] },
+      },
+      recipientName: 'Sabarmati Ceramic Depot',
+      recipientPhone: '+919800000303',
+      allowB2bWarehouseConfirm: true,
+      cargo: {
+        category: 'PALLET_BUNDLE',
+        quantity: 2,
+        unitDimensionsCm: cargo3.unitDimensionsCm,
+        unitActualWeightKg: 220,
+        totalActualWeightKg: cargo3.totalActualWeightKg,
+        volumetricDivisor: 5000,
+        volumetricWeightKg: cargo3.totalVolumetricWeightKg,
+        chargeableWeightKg: cargo3.chargeableWeightKg,
+        billingBasis: cargo3.billingBasis,
+        volumeCbm: cargo3.totalVolumeCbm,
+        stackable: false,
+        handlingRestrictions: ['FRAGILE'],
+        declaredContents: '2 Glazed Ceramic Tile Pallets',
+      },
+      tokenStatus: 'PAID',
+      status: 'LOCKED',
+      pricingSnapshot: {
+        pricingVersion: p3.pricingVersion,
+        ceilingPricePaise: p3.ceilingPricePaise,
+        projectedPricePaise: p3.computedPricePaise,
+        finalLockedPricePaise: p3.computedPricePaise,
+        tokenAmountPaise: p3.tokenAmountPaise,
+        tokenPaidPaise: p3.tokenAmountPaise,
+        remainingBalancePaise: p3.computedPricePaise - p3.tokenAmountPaise,
+        isAnchorEligible: false,
+        poolDiscountPaise: p3.poolDiscountPaise,
+        anchorDiscountPaise: 0,
+        handlingFeePaise: p3.handlingFeePaise,
+      },
+      trackingToken: tok3,
+      qrToken: `MCR_${crypto.randomBytes(12).toString('hex')}`,
+      statusHistory: [{ status: 'LOCKED', at: now, note: 'Assigned to demo PM trip' }],
+    });
+
+    pmTrip.shipmentIds = [ship3._id];
+    await pmTrip.save();
+
+    await Payment.insertMany([
+      {
+        shipmentId: ship1._id,
+        businessId: business1._id,
+        type: 'TOKEN',
+        amountPaise: p1.tokenAmountPaise,
+        status: 'SUCCESS',
+        mode: 'SIMULATED',
+        isSimulated: true,
+        providerRef: `SIM-SEED-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
+        actorUserId: shipper1._id,
+        processedAt: now,
+      },
+      {
+        shipmentId: ship2._id,
+        businessId: business2._id,
+        type: 'TOKEN',
+        amountPaise: p2.tokenAmountPaise,
+        status: 'SUCCESS',
+        mode: 'SIMULATED',
+        isSimulated: true,
+        providerRef: `SIM-SEED-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
+        actorUserId: shipper2._id,
+        processedAt: now,
+      },
+      {
+        shipmentId: ship3._id,
+        businessId: business3._id,
+        type: 'TOKEN',
+        amountPaise: p3.tokenAmountPaise,
+        status: 'SUCCESS',
+        mode: 'SIMULATED',
+        isSimulated: true,
+        providerRef: `SIM-SEED-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
+        actorUserId: shipper3._id,
+        processedAt: now,
+      },
+    ]);
+  }
+
+  await BackhaulRequest.findOneAndUpdate(
+    { requestCode: 'BH-AMD-VAD-001' },
     {
       $setOnInsert: {
-        tripCode: `MC-TRIP-${datePrefix}-001`,
+        requestCode: 'BH-AMD-VAD-001',
+        businessId: business1._id,
         corridorId: corridor._id,
-        slotId: seededSlots[0]._id,
-        vehicleId: tier1Vehicle._id,
-        driverId: driver1._id,
-        status: 'ASSIGNED',
-        plannedDepartureAt: morningDeparture,
-        estimatedEndAt: morningArrEnd,
-        stopsSummary: corridor.stops.map((s) => ({
-          stopCode: s.stopCode,
-          name: s.name,
-          sequenceOrder: s.sequenceOrder,
-        })),
-        notes: 'Demo scheduled corridor assignment (Tier 1 attached vehicle)',
+        originStopCode: 'AMD',
+        destinationStopCode: 'VAD',
+        originLocation: { type: 'Point', coordinates: [72.5714, 23.0225] },
+        destinationLocation: { type: 'Point', coordinates: [73.1812, 22.3072] },
+        earliestPickupAt: morningArrEnd,
+        latestArrivalAt: new Date(morningArrEnd.getTime() + 4 * 60 * 60 * 1000),
+        cargo: {
+          chargeableWeightKg: 950,
+          volumeCbm: 4.5,
+          unitDimensionsCm: { length: 120, width: 100, height: 90 },
+          declaredContents: 'Return empty textile bobbins & dye drums',
+        },
+        quotedRevenuePaise: 540000,
+        status: 'CONFIRMED',
       },
     },
     { upsert: true, returnDocument: 'after', runValidators: true }
   );
 
   return {
+    resetApplied: Boolean(options.reset),
     usersCount: demoUsers.length,
-    businessesCount: 2,
+    businessesCount: 3,
     corridorCode: corridor.code,
     slotsSeeded: slots.length,
     vehiclesCount: vehicles.length,
+    backhaulRequestsCount: 1,
+    trackingTokens,
   };
 }
 
@@ -440,8 +880,9 @@ const isMainModule =
   process.argv[1]?.endsWith('seed.ts');
 
 if (isMainModule) {
+  const shouldReset = process.argv.includes('--reset');
   connectDatabase()
-    .then(() => seedDatabase())
+    .then(() => seedDatabase({ reset: shouldReset }))
     .then((summary) => {
       console.log('Demo seed completed:', summary);
       return disconnectDatabase();
