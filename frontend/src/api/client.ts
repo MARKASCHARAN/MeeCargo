@@ -299,7 +299,8 @@ export function fetchOperationalImpactMetrics(): Promise<{
 
 export function createShipment(payload: {
   corridorId: string;
-  slotId: string;
+  serviceDate?: string;
+  slotId?: string;
   pickupStopCode: string;
   deliveryStopCode: string;
   pickupAddress?: StructuredAddress;
@@ -342,8 +343,10 @@ export function confirmShipmentToken(shipmentId: string): Promise<{
 
 export function fetchQuotePreview(payload: {
   corridorId: string;
-  slotId: string;
+  serviceDate?: string;
+  slotId?: string;
   chargeableWeightKg: number;
+  volumeCbm?: number;
   isAnchorEligible?: boolean;
 }): Promise<{
   success: boolean;
@@ -387,7 +390,7 @@ export function cancelShipment(
 
 export function submitViabilityDecision(
   shipmentId: string,
-  payload: { decision: 'ROLLOVER' | 'REFUND'; targetSlotId?: string }
+  payload: { decision: 'ROLLOVER' | 'REFUND'; targetServiceDate?: string; targetSlotId?: string }
 ): Promise<{
   success: boolean;
   decision: 'ROLLOVER' | 'REFUND';
@@ -544,7 +547,7 @@ export function transitionDriverTrip(
 
 export function scanDriverQrPickup(
   tripId: string,
-  payload: { qrToken: string; idempotencyKey?: string }
+  payload: { qrToken: string; expectedPickupStopCode?: string; idempotencyKey?: string }
 ): Promise<{
   success: boolean;
   deduplicated: boolean;
@@ -731,6 +734,7 @@ export function resolveShipmentException(
   exceptionId: string,
   payload: {
     action: 'RESCHEDULE' | 'RETURN' | 'REALLOCATE';
+    targetServiceDate?: string;
     targetSlotId?: string;
     note?: string;
   }

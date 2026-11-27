@@ -15,6 +15,16 @@ export interface OperationalImpactMetrics {
     totalCeilingBaselinePaise: number;
     estimatedSavingsPaise: number;
     estimatedSavingsPct: number;
+    projectedSpendPaise: number;
+    projectedBaselinePaise: number;
+    projectedSavingsPaise: number;
+    projectedSavingsPct: number | null;
+    finalizedSpendPaise: number;
+    finalizedBaselinePaise: number;
+    finalizedSavingsPaise: number;
+    finalizedSavingsPct: number | null;
+    hasPricedShipments: boolean;
+    hasValidBaselineComparison: boolean;
     baselineMethodology: string;
     isEstimated: true;
   };
@@ -47,9 +57,15 @@ export async function getOperationalAndShipperMetrics(params: {
 
   let totalActualOrProjectedSpendPaise = 0;
   let totalCeilingBaselinePaise = 0;
+  let projectedSpendPaise = 0;
+  let projectedBaselinePaise = 0;
+  let finalizedSpendPaise = 0;
+  let finalizedBaselinePaise = 0;
+  let pricedShipmentsCount = 0;
 
   for (const s of myShipments) {
     if (s.status === 'CANCELLED') continue;
+    const isFinalLocked = typeof s.pricingSnapshot?.finalLockedPricePaise === 'number';
     const charge =
       s.pricingSnapshot?.finalLockedPricePaise ??
       s.pricingSnapshot?.projectedPricePaise ??
@@ -57,6 +73,18 @@ export async function getOperationalAndShipperMetrics(params: {
     const ceiling = s.pricingSnapshot?.ceilingPricePaise ?? charge;
     totalActualOrProjectedSpendPaise += charge;
     totalCeilingBaselinePaise += ceiling;
+
+    if (charge > 0) {
+      pricedShipmentsCount += 1;
+    }
+
+    if (isFinalLocked) {
+      finalizedSpendPaise += charge;
+      finalizedBaselinePaise += ceiling;
+    } else if (charge > 0) {
+      projectedSpendPaise += charge;
+      projectedBaselinePaise += ceiling;
+    }
   }
 
   const estimatedSavingsPaise = Math.max(
@@ -67,6 +95,22 @@ export async function getOperationalAndShipperMetrics(params: {
     totalCeilingBaselinePaise > 0
       ? Number(((estimatedSavingsPaise / totalCeilingBaselinePaise) * 100).toFixed(1))
       : 0;
+
+  const projectedSavingsPaise = Math.max(0, projectedBaselinePaise - projectedSpendPaise);
+  const projectedSavingsPct =
+    projectedBaselinePaise > 0 && projectedSpendPaise > 0
+      ? Number(((projectedSavingsPaise / projectedBaselinePaise) * 100).toFixed(1))
+      : null;
+
+  const finalizedSavingsPaise = Math.max(0, finalizedBaselinePaise - finalizedSpendPaise);
+  const finalizedSavingsPct =
+    finalizedBaselinePaise > 0 && finalizedSpendPaise > 0
+      ? Number(((finalizedSavingsPaise / finalizedBaselinePaise) * 100).toFixed(1))
+      : null;
+
+  const hasPricedShipments = pricedShipmentsCount > 0;
+  const hasValidBaselineComparison =
+    hasPricedShipments && totalCeilingBaselinePaise > 0 && totalActualOrProjectedSpendPaise > 0;
 
   const deliveredCount = myShipments.filter((s) => s.status === 'DELIVERED').length;
   const failedCount = myShipments.filter((s) => s.status === 'FAILED').length;
@@ -163,6 +207,16 @@ export async function getOperationalAndShipperMetrics(params: {
       totalCeilingBaselinePaise,
       estimatedSavingsPaise,
       estimatedSavingsPct,
+      projectedSpendPaise,
+      projectedBaselinePaise,
+      projectedSavingsPaise,
+      projectedSavingsPct,
+      finalizedSpendPaise,
+      finalizedBaselinePaise,
+      finalizedSavingsPaise,
+      finalizedSavingsPct,
+      hasPricedShipments,
+      hasValidBaselineComparison,
       baselineMethodology:
         'Estimated savings = Guaranteed single-shipment rate ceiling minus locked/projected pooled charges (never a hardcoded percentage claim).',
       isEstimated: true,

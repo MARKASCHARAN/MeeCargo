@@ -15,7 +15,6 @@ import {
 import { cn } from '../lib/cn';
 import { logoutUser } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
-import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 
 const shipperNav = [
@@ -109,13 +108,10 @@ export function ShipperLayout() {
               {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
             <span className="font-semibold text-slate-900 md:hidden">MeeCargo Shipper</span>
-            <Badge variant="info" className="hidden sm:inline-flex">
-              Automated Pooling Active
-            </Badge>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Badge variant="neutral">SHIPPER</Badge>
+          <div className="flex items-center gap-3 text-xs text-slate-600">
+            <span className="hidden truncate sm:inline">{user?.email}</span>
           </div>
         </header>
 

@@ -110,7 +110,28 @@ export interface Slot {
   availableWeightKg: number;
   availableVolumeCbm: number;
   isPastCutoff: boolean;
+  isFull?: boolean;
   status: 'OPEN' | 'LOCKING' | 'LOCKED' | 'COMPLETED' | 'CANCELLED';
+}
+
+export interface CorridorServiceDateSummary {
+  serviceDate: string;
+  departureDate: string;
+  status: 'OPEN' | 'LOCKED' | 'FULL' | 'CLOSED';
+  bookable: boolean;
+  pooledShipmentCount: number;
+  capacityWeightKg: number;
+  capacityVolumeCbm: number;
+  reservedWeightKg: number;
+  reservedVolumeCbm: number;
+  availableWeightKg: number;
+  availableVolumeCbm: number;
+  maxSinglePoolAvailableWeightKg: number;
+  maxSinglePoolAvailableVolumeCbm: number;
+  weightUtilizationPct: number;
+  volumeUtilizationPct: number;
+  projectedRatePaisePerKg: number;
+  cutoffAt: string;
 }
 
 export interface Corridor {
@@ -120,11 +141,12 @@ export interface Corridor {
   description?: string;
   stops: CorridorStop[];
   operatingDays: string[];
-  isEstablishedRoute: boolean;
+  isEstablishedRoute?: boolean;
   guaranteedCeilingPaisePerKg: number;
   baseRatePaisePerKg: number;
-  viabilityThresholdPct: number;
-  isDemoData: boolean;
+  viabilityThresholdPct?: number;
+  isDemoData?: boolean;
+  serviceDates?: CorridorServiceDateSummary[];
   slots: Slot[];
 }
 
@@ -170,6 +192,7 @@ export interface Shipment {
         _id: string;
         slotCode: string;
         label: string;
+        departureDate?: string;
         plannedDepartureAt: string;
         cutoffAt: string;
       };
@@ -280,7 +303,7 @@ export interface PoolLiveMetrics {
   capacityVolumeCbm: number;
   shipmentCount: number;
   projectedRatePaisePerKg: number;
-  appliedTierLabel: string;
+  appliedTierLabel?: string;
   isEstimateFinal: boolean;
   viabilityStatus: string;
   updatedAt: string;
@@ -288,7 +311,7 @@ export interface PoolLiveMetrics {
 
 export interface PoolSummary {
   _id: string;
-  poolCode: string;
+  poolCode?: string;
   status:
     | 'OPEN'
     | 'LOCKING'
@@ -302,12 +325,15 @@ export interface PoolSummary {
     _id: string;
     code: string;
     name: string;
-    isEstablishedRoute: boolean;
+    isEstablishedRoute?: boolean;
+    guaranteedCeilingPaisePerKg?: number;
   };
   slotId?: {
     _id: string;
-    slotCode: string;
+    slotNumber?: 1 | 2;
+    slotCode?: string;
     label: string;
+    departureDate?: string;
     cutoffAt: string;
     plannedDepartureAt: string;
   };
@@ -402,14 +428,56 @@ export interface TripSummary {
     _id: string;
     code: string;
     name: string;
+    turnaroundBufferMin?: number;
+    estimatedOutboundDurationMin?: number;
+    stops?: CorridorStopSummary[];
   };
   slotId?: {
     _id: string;
+    slotNumber?: 1 | 2;
     slotCode: string;
     label: string;
+    departureDate?: string;
     plannedDepartureAt: string;
     estimatedArrivalStartAt: string;
     estimatedArrivalEndAt: string;
+    returnTimeOptions?: string[];
+    returnTimeLocked?: boolean;
+    lockedReturnTime?: string;
+  };
+  sourceCommitmentId?:
+    | {
+        _id: string;
+        slotNumber: 1 | 2;
+        selectedPickupTime: string;
+        selectedReturnTime: string;
+        status: DriverSlotCommitmentStatus;
+        departureDate: string;
+      }
+    | string;
+  quarantined?: boolean;
+  quarantineReason?: string;
+  scheduleSnapshot?: {
+    serviceDate: string;
+    slotNumber?: 1 | 2;
+    slotCode: string;
+    slotLabel: string;
+    outboundPickupTime: string;
+    selectedReturnTime: string;
+    returnTimeLocked: boolean;
+  };
+  vehicleSnapshot?: {
+    registrationNumber: string;
+    vehicleClass: string;
+    bodyType?: string;
+    maxWeightKg: number;
+    maxVolumeCbm: number;
+    bedDimensionsCm?: {
+      length: number;
+      width: number;
+      height: number;
+    };
+    ownershipType?: string;
   };
   vehicleId?: VehicleSummary;
   allocationEconomics?: {
@@ -422,6 +490,7 @@ export interface TripSummary {
     reason: string;
   };
   routePlan?: {
+    routeVersion?: number;
     optimizationStatus: 'PENDING' | 'OPTIMAL' | 'INFEASIBLE' | 'OPTIMIZER_UNAVAILABLE';
     provider: 'OR_TOOLS' | 'NONE';
     matrixProvider: 'FIXTURE' | 'OSRM';
@@ -437,6 +506,14 @@ export interface TripSummary {
     }>;
     failureReason?: string;
     optimizedAt?: string;
+    routeHistory?: Array<{
+      version: number;
+      optimizationStatus: string;
+      totalDistanceMeters: number;
+      estimatedDurationSeconds: number;
+      reason?: string;
+      supersededAt: string;
+    }>;
   };
   loadingPlan?: {
     zoneMapping: Array<{
@@ -473,6 +550,9 @@ export interface TripSummary {
       at: string;
     }>;
     planningAidDisclaimer: string;
+    planStatus?: 'READY' | 'UNAVAILABLE_MISSING_DIMENSIONS' | 'OVER_CAPACITY';
+    missingDimensions?: string[];
+    capacityIssues?: string[];
   };
   backhaulDecision?: {
     decision: 'MATCHED' | 'EARLY_TURNAROUND' | 'PENDING';
@@ -482,7 +562,13 @@ export interface TripSummary {
     expectedReturnRevenuePaise: number;
     netContributionPaise: number;
     tier1MinGuaranteeIncludedPaise: number;
+    scheduledReturnTime?: string;
+    returnStops?: Array<{ stopCode: string; name: string; action: string }>;
+    returnShipmentCount?: number;
+    returnCargoSummary?: string;
+    emptyReturn?: boolean;
     reason: string;
+    evaluatedAt?: string;
   };
   stopsSummary: Array<{
     stopCode: string;
@@ -492,11 +578,13 @@ export interface TripSummary {
   shipmentIds?: Array<{
     _id: string;
     reference: string;
+    pickupStopCode?: string;
     deliveryStopCode: string;
     recipientName: string;
     status: ShipmentStatus;
     qrToken: string;
     allowB2bWarehouseConfirm: boolean;
+    pickupBalanceCollectedAt?: string;
     deliveryAddress: StructuredAddress;
     cargo: {
       category: CargoCategory;
@@ -555,6 +643,16 @@ export interface OperationalImpactMetrics {
     totalCeilingBaselinePaise: number;
     estimatedSavingsPaise: number;
     estimatedSavingsPct: number;
+    projectedSpendPaise?: number;
+    projectedBaselinePaise?: number;
+    projectedSavingsPaise?: number;
+    projectedSavingsPct?: number | null;
+    finalizedSpendPaise?: number;
+    finalizedBaselinePaise?: number;
+    finalizedSavingsPaise?: number;
+    finalizedSavingsPct?: number | null;
+    hasPricedShipments?: boolean;
+    hasValidBaselineComparison?: boolean;
     baselineMethodology: string;
     isEstimated: true;
   };
@@ -736,8 +834,10 @@ export interface CorridorFacets {
 
 export type DriverSlotCommitmentStatus =
   | 'COMMITTED'
+  | 'LOCKED'
   | 'WITHDRAWN'
   | 'ALLOCATED'
+  | 'NOT_ALLOCATED'
   | 'EXPIRED'
   | 'INVALIDATED';
 
@@ -772,14 +872,32 @@ export interface DriverSlotCommitmentRecord {
   allocatedAt?: string;
 }
 
+export interface DriverWindowConflictDetail {
+  sourceType: 'COMMITMENT' | 'TRIP';
+  slotId?: string;
+  slotNumber?: 1 | 2;
+  corridorCode?: string;
+  tripCode?: string;
+  departureDate: string;
+  pickupTime: string;
+  returnTime: string;
+  turnaroundBufferMin: number;
+}
+
 export interface DriverPoolingSlotItem {
   slotId: string;
   slotCode: string;
   slotNumber: 1 | 2;
+  slotStatus?: string;
   label: string;
   departureDate: string;
   cutoffAt: string;
   plannedDepartureAt: string;
+  availabilityState?: 'COMMITTED' | 'OPEN_FOR_SELECTION' | 'UNAVAILABLE_SCHEDULE_CONFLICT';
+  conflictReason?: string | null;
+  conflictDetail?: DriverWindowConflictDetail | null;
+  optionConflicts?: Record<string, string | null>;
+  turnaroundBufferMin?: number;
   corridor: {
     _id: string;
     code: string;
@@ -792,6 +910,12 @@ export interface DriverPoolingSlotItem {
     defaultReturnTime: string;
     returnTimeLocked: boolean;
     lockedReturnTime?: string;
+  };
+  capacity?: {
+    capacityWeightKg: number;
+    capacityVolumeCbm: number;
+    reservedWeightKg: number;
+    reservedVolumeCbm: number;
   };
   poolSummary: {
     poolId: string;

@@ -142,6 +142,12 @@ describe('Stage 8 Pickup Collections, Trip Economics Ledger, History & Metrics (
     const metrics = await getOperationalAndShipperMetrics({ businessId });
     expect(metrics.shipperScoped.estimatedSavingsPaise).toBe(12000);
     expect(metrics.shipperScoped.estimatedSavingsPct).toBe(20);
+    expect(metrics.shipperScoped.finalizedSpendPaise).toBe(48000);
+    expect(metrics.shipperScoped.finalizedSavingsPaise).toBe(12000);
+    expect(metrics.shipperScoped.finalizedSavingsPct).toBe(20);
+    expect(metrics.shipperScoped.projectedSpendPaise).toBe(0);
+    expect(metrics.shipperScoped.hasPricedShipments).toBe(true);
+    expect(metrics.shipperScoped.hasValidBaselineComparison).toBe(true);
     expect(metrics.shipperScoped.baselineMethodology).toContain('ceiling');
     expect(metrics.platformUtilization.avgVehicleWeightUtilizationPct).toBe(40);
     expect(metrics.platformUtilization.avgVehicleVolumeUtilizationPct).toBe(75);
