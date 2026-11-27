@@ -32,7 +32,7 @@ export async function connectDatabase(uri: string = env.MONGODB_URL): Promise<vo
     );
     if (!hasReplicaSet) {
       console.warn(
-        'MongoDB is running without a replica set. Multi-document transactions will run sequentially without ACID rollback. See README for replica-set setup.'
+        'MongoDB is running in standalone mode. Multi-document transactions will run sequentially without ACID rollback; use MongoDB Atlas or a replica-set URI for full transaction guarantees.'
       );
     }
   } catch (error) {

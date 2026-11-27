@@ -88,7 +88,10 @@ const paymentSchema = new Schema<IPayment>(
 
 paymentSchema.index(
   { shipmentId: 1, idempotencyKey: 1 },
-  { unique: true, sparse: true }
+  {
+    unique: true,
+    partialFilterExpression: { idempotencyKey: { $type: 'string' } },
+  }
 );
 
 export const Payment = model<IPayment>('Payment', paymentSchema);

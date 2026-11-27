@@ -131,12 +131,12 @@ export async function executePoolCutoff(params: {
 
   try {
     const lockResult = await withTransaction(async (session) => {
-      const [corridor, slot, rules, shipments] = await Promise.all([
-        Corridor.findById(lockingPool.corridorId).session(session),
-        Slot.findById(lockingPool.slotId).session(session),
-        getActivePricingRules(),
-        Shipment.find({ _id: { $in: lockingPool.shipmentIds } }).session(session),
-      ]);
+      const corridor = await Corridor.findById(lockingPool.corridorId).session(session);
+      const slot = await Slot.findById(lockingPool.slotId).session(session);
+      const rules = await getActivePricingRules();
+      const shipments = await Shipment.find({
+        _id: { $in: lockingPool.shipmentIds },
+      }).session(session);
 
       if (!corridor || !slot) {
         throw new HttpError(404, 'Corridor or slot missing during lock', 'NOT_FOUND');
@@ -421,40 +421,38 @@ export async function submitViabilityDecision(params: {
       );
     }
 
-    const [corridor, targetSlot] = await Promise.all([
-      Corridor.findById(shipment.corridorId).session(session),
-      Slot.findOneAndUpdate(
-        {
-          _id: targetSlotId,
-          corridorId: shipment.corridorId,
-          status: 'OPEN',
-          cutoffAt: { $gt: new Date() },
-          $expr: {
-            $and: [
-              {
-                $lte: [
-                  { $add: ['$reservedWeightKg', shipment.cargo.chargeableWeightKg] },
-                  '$capacityWeightKg',
-                ],
-              },
-              {
-                $lte: [
-                  { $add: ['$reservedVolumeCbm', shipment.cargo.volumeCbm] },
-                  '$capacityVolumeCbm',
-                ],
-              },
-            ],
-          },
+    const corridor = await Corridor.findById(shipment.corridorId).session(session);
+    const targetSlot = await Slot.findOneAndUpdate(
+      {
+        _id: targetSlotId,
+        corridorId: shipment.corridorId,
+        status: 'OPEN',
+        cutoffAt: { $gt: new Date() },
+        $expr: {
+          $and: [
+            {
+              $lte: [
+                { $add: ['$reservedWeightKg', shipment.cargo.chargeableWeightKg] },
+                '$capacityWeightKg',
+              ],
+            },
+            {
+              $lte: [
+                { $add: ['$reservedVolumeCbm', shipment.cargo.volumeCbm] },
+                '$capacityVolumeCbm',
+              ],
+            },
+          ],
         },
-        {
-          $inc: {
-            reservedWeightKg: shipment.cargo.chargeableWeightKg,
-            reservedVolumeCbm: shipment.cargo.volumeCbm,
-          },
+      },
+      {
+        $inc: {
+          reservedWeightKg: shipment.cargo.chargeableWeightKg,
+          reservedVolumeCbm: shipment.cargo.volumeCbm,
         },
-        { returnDocument: 'after', session: session ?? undefined }
-      ),
-    ]);
+      },
+      { returnDocument: 'after', session: session ?? undefined }
+    );
 
     if (!corridor || !targetSlot) {
       throw new HttpError(

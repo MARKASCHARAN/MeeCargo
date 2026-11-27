@@ -71,11 +71,9 @@ export async function processTokenPayment(params: {
       };
     }
 
-    const [corridor, slot, rules] = await Promise.all([
-      Corridor.findById(shipment.corridorId).session(session),
-      Slot.findById(shipment.slotId).session(session),
-      getActivePricingRules(),
-    ]);
+    const corridor = await Corridor.findById(shipment.corridorId).session(session);
+    const slot = await Slot.findById(shipment.slotId).session(session);
+    const rules = await getActivePricingRules();
 
     if (!corridor || !slot) {
       throw new HttpError(404, 'Corridor or slot not found', 'NOT_FOUND');
