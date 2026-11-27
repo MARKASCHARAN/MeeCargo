@@ -1,5 +1,11 @@
 import type { ClientSession } from 'mongoose';
 import type { ICorridor } from '../models/Corridor.js';
+import { DriverContract } from '../models/DriverContract.js';
+import { DriverProfile } from '../models/DriverProfile.js';
+import {
+  DriverSlotCommitment,
+  type IDriverSlotCommitment,
+} from '../models/DriverSlotCommitment.js';
 import type { IPool } from '../models/Pool.js';
 import type { IShipment } from '../models/Shipment.js';
 import type { ISlot } from '../models/Slot.js';
@@ -76,10 +82,11 @@ export function isVehicleAvailableForSlot(
   vehicle: Pick<
     IVehicle,
     '_id' | 'isAvailable' | 'unavailableDates' | 'blockedSlotIds'
-  >,
+  > & { operationalStatus?: IVehicle['operationalStatus'] },
   slot: Pick<ISlot, '_id' | 'departureDate'>
 ): boolean {
   if (!vehicle.isAvailable) return false;
+  if (vehicle.operationalStatus && vehicle.operationalStatus !== 'ACTIVE') return false;
   const dateKey = new Date(slot.departureDate).toISOString().slice(0, 10);
   if (vehicle.unavailableDates?.includes(dateKey)) return false;
   if (vehicle.blockedSlotIds?.some((id) => id.equals(slot._id))) return false;
@@ -102,9 +109,30 @@ export function computeVehiclePayoutPaise(
   return Math.max(minGuarantee, distanceCost);
 }
 
+function matchesCorridorSlotSchedule(
+  corridor: Pick<ICorridor, 'slotSchedules'>,
+  slot: Pick<ISlot, 'slotNumber' | 'slotCode'>
+): boolean {
+  if (!corridor.slotSchedules || corridor.slotSchedules.length === 0) {
+    return true;
+  }
+  if (slot.slotNumber === 1 || slot.slotNumber === 2) {
+    return corridor.slotSchedules.some((s) => s.slotNumber === slot.slotNumber);
+  }
+  const codeUpper = slot.slotCode.toUpperCase();
+  if (codeUpper.endsWith('-AM') || codeUpper.includes('SLOT1')) {
+    return corridor.slotSchedules.some((s) => s.slotNumber === 1);
+  }
+  if (codeUpper.endsWith('-PM') || codeUpper.includes('SLOT2')) {
+    return corridor.slotSchedules.some((s) => s.slotNumber === 2);
+  }
+  return true;
+}
+
 export interface FleetAllocationOutcome {
   allocated: boolean;
   vehicle?: IVehicle;
+  commitment?: IDriverSlotCommitment;
   economics?: TripAllocationEconomics;
   reason: string;
 }
@@ -136,16 +164,49 @@ export async function allocateVehicleForPool(params: {
     };
   }
 
+  // Validate configured central corridor slot schedule relationship
+  if (!matchesCorridorSlotSchedule(corridor, slot)) {
+    return {
+      allocated: false,
+      reason: 'Selected slot does not match configured corridor pickup and return schedule.',
+    };
+  }
+
+  // Sequential queries when inside MongoDB transaction session
   const allVehicles = await Vehicle.find({ isAvailable: true }).session(session);
-  const busyVehicleDocs = await Trip.find({
+  const busyTrips = await Trip.find({
     status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'IN_PROGRESS', 'PAUSED'] },
     plannedDepartureAt: { $lt: slot.estimatedArrivalEndAt },
     estimatedEndAt: { $gt: slot.plannedDepartureAt },
   })
-    .select('vehicleId')
+    .select('vehicleId driverId')
     .session(session);
 
-  const busyVehicleIds = new Set(busyVehicleDocs.map((t) => String(t.vehicleId)));
+  const tier1Profiles = await DriverProfile.find({ fleetTier: 'TIER_1' }).session(session);
+  const activeContracts = await DriverContract.find({ status: 'ACTIVE' }).session(session);
+  const slotCommitments = await DriverSlotCommitment.find({
+    slotId: slot._id,
+    status: 'COMMITTED',
+  }).session(session);
+
+  const busyVehicleIds = new Set(busyTrips.map((t) => String(t.vehicleId)));
+  const busyDriverIds = new Set(busyTrips.map((t) => String(t.driverId)));
+
+  const profileByDriverId = new Map(tier1Profiles.map((p) => [String(p.userId), p]));
+  const commitmentByDriverId = new Map(
+    slotCommitments.map((c) => [String(c.driverUserId), c])
+  );
+  const slotDateMs = new Date(slot.departureDate).getTime();
+
+  const activeContractByDriverId = new Map(
+    activeContracts
+      .filter((c) => {
+        const startMs = new Date(c.startDate).getTime();
+        const endMs = new Date(c.endDate).getTime();
+        return slotDateMs >= startMs && slotDateMs <= endMs;
+      })
+      .map((c) => [String(c.driverUserId), c])
+  );
 
   const candidateVehicles = allVehicles.filter(
     (v) =>
@@ -154,43 +215,82 @@ export async function allocateVehicleForPool(params: {
       doesCargoFitVehicle(shipments, v).feasible
   );
 
-  // 1. Tier 1 contracted vehicles for this corridor & schedule
-  const contractedTier1All = allVehicles.filter(
-    (v) =>
-      v.tier === 'TIER_1' &&
-      v.contractedCorridorIds.some((cid) => cid.equals(corridor._id))
-  );
-  const tier1ContractedMinGuarantee = contractedTier1All.reduce(
-    (maxG, v) =>
-      Math.max(maxG, v.payoutModel?.minGuaranteePaise ?? v.minGuaranteePaise ?? 0),
-    0
-  );
+  // Determine contractual Tier 1 min guarantee baseline across active corridor-eligible Tier 1 contracts
+  const contractedTier1All = allVehicles.filter((v) => {
+    if (v.tier !== 'TIER_1') return false;
+    const contract = v.driverId ? activeContractByDriverId.get(String(v.driverId)) : undefined;
+    if (contract) {
+      return contract.eligibleCorridorIds.some((cid) => cid.equals(corridor._id));
+    }
+    return v.contractedCorridorIds.some((cid) => cid.equals(corridor._id));
+  });
 
+  const tier1ContractedMinGuarantee = contractedTier1All.reduce((maxG, v) => {
+    const contract = v.driverId ? activeContractByDriverId.get(String(v.driverId)) : undefined;
+    const guarantee =
+      contract?.minimumGuaranteeTerms?.minGuaranteePaise ??
+      v.payoutModel?.minGuaranteePaise ??
+      v.minGuaranteePaise ??
+      0;
+    return Math.max(maxG, guarantee);
+  }, 0);
+
+  // 1. Tier 1 driver-owned contract vehicles eligible for this corridor & slot schedule
   const feasibleTier1 = candidateVehicles.filter((v) => {
     if (v.tier !== 'TIER_1') return false;
-    if (!v.contractedCorridorIds.some((cid) => cid.equals(corridor._id))) return false;
-    if (v.contractedSlotLabels?.length > 0) {
-      return v.contractedSlotLabels.some((lbl) =>
-        slot.slotCode.toUpperCase().includes(lbl.toUpperCase())
-      );
+    if (v.ownershipType && v.ownershipType !== 'DRIVER_OWNED') return false;
+    if (!v.driverId) return false;
+
+    const driverIdStr = String(v.driverId);
+    if (busyDriverIds.has(driverIdStr)) return false;
+
+    const driverProfile = profileByDriverId.get(driverIdStr);
+    if (!driverProfile) return false;
+    if (driverProfile.accountStatus && driverProfile.accountStatus !== 'ACTIVE') return false;
+    if (driverProfile.availabilityStatus !== 'AVAILABLE') return false;
+
+    const contract = activeContractByDriverId.get(driverIdStr);
+    if (!contract || contract.status !== 'ACTIVE') return false;
+
+    const corridorAllowed = contract.eligibleCorridorIds.some((cid) =>
+      cid.equals(corridor._id)
+    );
+    if (!corridorAllowed) return false;
+
+    // MC-048/MC-049/MC-050: Tier 1 participation is derived from validated pooling-window
+    // slot commitments rather than permanent contract slot assignments.
+    const commitment = commitmentByDriverId.get(driverIdStr);
+    if (!commitment) return false;
+    if (commitment.vehicleId && String(commitment.vehicleId) !== String(v._id)) {
+      return false;
     }
     return true;
   });
 
-  // Sort Tier 1 by smallest vehicle that fits (right-sizing within Tier 1 first)
+  // Sort Tier 1 by smallest driver-owned vehicle that fits
   feasibleTier1.sort((a, b) => a.maxWeightKg - b.maxWeightKg);
 
   const feasibleTier2 = candidateVehicles
     .filter((v) => v.tier === 'TIER_2')
     .sort((a, b) => a.maxWeightKg - b.maxWeightKg);
 
-  // Policy: Tier 1 is considered first for its contracted corridor/slot.
+  // Policy: Tier 1 driver-owned contracted capacity with valid slot commitment is evaluated first
   if (feasibleTier1.length > 0) {
     const bestTier1 = feasibleTier1[0];
-    const tier1Payout = computeVehiclePayoutPaise(bestTier1, estimatedDistanceKm);
+    const selectedCommitment = commitmentByDriverId.get(String(bestTier1.driverId));
+    const contract = activeContractByDriverId.get(String(bestTier1.driverId));
+    const minG =
+      contract?.minimumGuaranteeTerms?.minGuaranteePaise ??
+      bestTier1.payoutModel?.minGuaranteePaise ??
+      bestTier1.minGuaranteePaise ??
+      0;
+    const perKm =
+      contract?.minimumGuaranteeTerms?.perKmRatePaise ??
+      bestTier1.payoutModel?.perKmRatePaise ??
+      bestTier1.perKmRatePaise ??
+      2400;
+    const tier1Payout = Math.max(minG, Math.round(perKm * estimatedDistanceKm));
 
-    // Optional right-sizing to Tier 2 ONLY when Tier 1 guarantee is still preserved
-    // and total combined cost (Tier 1 min guarantee + Tier 2 payout) is strictly lower.
     if (allowRightSizing && feasibleTier2.length > 0) {
       const bestTier2 = feasibleTier2[0];
       const tier2Payout = computeVehiclePayoutPaise(bestTier2, estimatedDistanceKm);
@@ -209,7 +309,7 @@ export async function allocateVehicleForPool(params: {
             estimatedVehiclePayoutPaise: tier2Payout,
             rightSized: true,
             reason:
-              'Right-sized to smaller Tier 2 vehicle while preserving Tier 1 contractual minimum guarantee in economics.',
+              'Right-sized to smaller Tier 2 marketplace vehicle while preserving Tier 1 contractual minimum guarantee in economics.',
           },
           reason: 'Allocated right-sized Tier 2 vehicle with Tier 1 guarantee preserved.',
         };
@@ -219,22 +319,21 @@ export async function allocateVehicleForPool(params: {
     return {
       allocated: true,
       vehicle: bestTier1,
+      commitment: selectedCommitment,
       economics: {
         allocatedTier: 'TIER_1',
-        tier1MinGuaranteeIncludedPaise:
-          bestTier1.payoutModel?.minGuaranteePaise ?? bestTier1.minGuaranteePaise ?? 0,
-        selectedVehicleMinGuaranteePaise:
-          bestTier1.payoutModel?.minGuaranteePaise ?? bestTier1.minGuaranteePaise ?? 0,
+        tier1MinGuaranteeIncludedPaise: minG,
+        selectedVehicleMinGuaranteePaise: minG,
         estimatedDistanceKm,
         estimatedVehiclePayoutPaise: tier1Payout,
         rightSized: false,
-        reason: 'Allocated contracted Tier 1 attached vehicle.',
+        reason: 'Allocated Tier 1 driver-owned contract vehicle with validated slot commitment.',
       },
-      reason: 'Allocated contracted Tier 1 attached vehicle.',
+      reason: 'Allocated Tier 1 driver-owned contract vehicle with validated slot commitment.',
     };
   }
 
-  // 2. Tier 2 overflow / express when no feasible Tier 1 is available
+  // 2. Tier 2 independent marketplace overflow / non-contracted capacity
   if (feasibleTier2.length > 0) {
     const bestTier2 = feasibleTier2[0];
     const tier2Payout = computeVehiclePayoutPaise(bestTier2, estimatedDistanceKm);
@@ -256,7 +355,7 @@ export async function allocateVehicleForPool(params: {
     };
   }
 
-  // 3. Tier 3 is considered strictly for return/backhaul work
+  // 3. Tier 3 strictly for return/backhaul work
   if (isBackhaul) {
     const feasibleTier3 = candidateVehicles
       .filter((v) => v.tier === 'TIER_3' && v.supportsBackhaul)
@@ -286,6 +385,6 @@ export async function allocateVehicleForPool(params: {
   return {
     allocated: false,
     reason:
-      'No feasible vehicle meets weight, volume, dimension, schedule, and fleet tier requirements. Flagged for rollover or refund.',
+      'No feasible driver-owned or marketplace vehicle meets weight, volume, dimension, contract, schedule, and fleet tier requirements. Flagged for rollover or refund.',
   };
 }

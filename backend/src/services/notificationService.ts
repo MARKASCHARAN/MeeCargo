@@ -14,7 +14,8 @@ export type NotificationEventType =
   | 'DRIVER_APPROACHING'
   | 'DELIVERY_COMPLETED'
   | 'DELIVERY_FAILED'
-  | 'ROLLOVER_REFUND_REQUIRED';
+  | 'ROLLOVER_REFUND_REQUIRED'
+  | 'POOLING_WINDOW_OPEN';
 
 export interface NotificationTemplate {
   title: (vars: Record<string, string>) => string;
@@ -77,8 +78,13 @@ export const NOTIFICATION_TEMPLATES: Record<
   },
   ROLLOVER_REFUND_REQUIRED: {
     title: (v) => `Action required for ${v.reference}`,
-    body: (v) =>
+    body: () =>
       `New route below viability threshold. Choose slot rollover or full token refund.`,
+  },
+  POOLING_WINDOW_OPEN: {
+    title: (v) => `Pooling window open: ${v.corridorCode} (${v.slotLabel ?? ''})`,
+    body: (v) =>
+      `Select pickup/return availability for ${v.corridorName ?? v.corridorCode} (${v.departureDate ?? ''}) before cutoff ${v.cutoffTime ?? ''}.`,
   },
 };
 

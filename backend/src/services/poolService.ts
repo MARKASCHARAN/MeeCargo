@@ -5,6 +5,7 @@ import { isValidShipmentTransition, Shipment, type IShipment } from '../models/S
 import { Slot, type ISlot } from '../models/Slot.js';
 import { emitPoolUpdated, type PoolLiveEvent } from '../socket/poolGateway.js';
 import { HttpError } from '../utils/errors.js';
+import { notifyEligibleTier1DriversForSlot } from './driverSlotService.js';
 import {
   calculateDeterministicPrice,
   getActivePricingRules,
@@ -152,6 +153,14 @@ export async function addShipmentToPool(params: {
 }): Promise<{ pool: IPool; liveEvent: PoolLiveEvent }> {
   const { shipment, slot, corridor, actorUserId, session } = params;
 
+  if (corridor.isActive === false) {
+    throw new HttpError(
+      409,
+      `Corridor ${corridor.code} is inactive and cannot open new pooling activity.`,
+      'CORRIDOR_INACTIVE'
+    );
+  }
+
   if (shipment.tokenStatus !== 'PAID') {
     throw new HttpError(
       409,
@@ -278,6 +287,14 @@ export async function addShipmentToPool(params: {
 
   const liveEvent = buildPoolLiveEvent(updatedPool, corridor, rules);
   emitPoolUpdated(liveEvent);
+
+  if (updatedPool.shipmentIds.length === 1) {
+    try {
+      await notifyEligibleTier1DriversForSlot({ corridor, slot });
+    } catch {
+      // Best-effort notification for eligible Tier 1 drivers on pooling window activation
+    }
+  }
 
   return { pool: updatedPool, liveEvent };
 }

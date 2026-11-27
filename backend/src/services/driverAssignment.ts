@@ -3,6 +3,7 @@ import { isValidObjectId, type ClientSession, type Types } from 'mongoose';
 import { withTransaction } from '../config/database.js';
 import { Corridor } from '../models/Corridor.js';
 import { DriverProfile } from '../models/DriverProfile.js';
+import { DriverSlotCommitment } from '../models/DriverSlotCommitment.js';
 import { NotificationLog } from '../models/NotificationLog.js';
 import { Pool } from '../models/Pool.js';
 import { Shipment } from '../models/Shipment.js';
@@ -11,6 +12,7 @@ import { Trip, type ITrip } from '../models/Trip.js';
 import { emitDriverAssignment, emitPoolUpdated } from '../socket/poolGateway.js';
 import { HttpError } from '../utils/errors.js';
 import { allocateVehicleForPool } from './fleetAllocator.js';
+import { combineDateAndTime } from './driverSlotService.js';
 import { evaluateBackhaulForTrip } from './backhaulService.js';
 import { buildPoolLiveEvent } from './poolService.js';
 import { getActivePricingRules } from './pricingEngine.js';
@@ -60,6 +62,7 @@ async function selectEligibleDriver(params: {
     const preferred = await DriverProfile.findOne({
       userId: preferredDriverId,
       availabilityStatus: 'AVAILABLE',
+      accountStatus: { $nin: ['INACTIVE', 'SUSPENDED'] },
     }).session(session);
 
     if (preferred) {
@@ -77,6 +80,7 @@ async function selectEligibleDriver(params: {
 
   const candidates = await DriverProfile.find({
     availabilityStatus: 'AVAILABLE',
+    accountStatus: { $nin: ['INACTIVE', 'SUSPENDED'] },
     userId: { $nin: Array.from(excluded) },
   })
     .sort({ fleetTier: 1 })
@@ -244,6 +248,15 @@ export async function allocateAndAssignTripForPool(params: {
       .slice(0, 10)
       .replace(/-/g, '')}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 
+    const estimatedEndAt = allocation.commitment?.selectedReturnTime
+      ? (() => {
+          const end = combineDateAndTime(slot.departureDate, allocation.commitment.selectedReturnTime);
+          return end <= slot.plannedDepartureAt
+            ? new Date(end.getTime() + 24 * 60 * 60 * 1000)
+            : end;
+        })()
+      : slot.estimatedArrivalEndAt;
+
     const [trip] = await Trip.create(
       [
         {
@@ -256,7 +269,7 @@ export async function allocateAndAssignTripForPool(params: {
           shipmentIds: shipments.map((s) => s._id),
           status: 'ASSIGNED',
           plannedDepartureAt: slot.plannedDepartureAt,
-          estimatedEndAt: slot.estimatedArrivalEndAt,
+          estimatedEndAt,
           stopsSummary: corridor.stops.map((s) => ({
             stopCode: s.stopCode,
             name: s.name,
@@ -280,6 +293,29 @@ export async function allocateAndAssignTripForPool(params: {
       ],
       { session: session ?? undefined }
     );
+
+    if (allocation.commitment) {
+      await DriverSlotCommitment.updateOne(
+        { _id: allocation.commitment._id },
+        { $set: { status: 'ALLOCATED', poolId: pool._id, allocatedAt: new Date() } },
+        { session: session ?? undefined }
+      );
+      await DriverSlotCommitment.updateMany(
+        {
+          slotId: slot._id,
+          status: 'COMMITTED',
+          _id: { $ne: allocation.commitment._id },
+        },
+        { $set: { status: 'EXPIRED' } },
+        { session: session ?? undefined }
+      );
+    } else {
+      await DriverSlotCommitment.updateMany(
+        { slotId: slot._id, status: 'COMMITTED' },
+        { $set: { status: 'EXPIRED' } },
+        { session: session ?? undefined }
+      );
+    }
 
     await Shipment.updateMany(
       { _id: { $in: shipments.map((s) => s._id) } },

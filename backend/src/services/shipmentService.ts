@@ -129,12 +129,19 @@ export async function createShipmentBooking(params: {
   }
 
   const [corridor, slot] = await Promise.all([
-    Corridor.findOne({ _id: input.corridorId, isActive: true }),
+    Corridor.findById(input.corridorId),
     Slot.findById(input.slotId),
   ]);
 
   if (!corridor) {
-    throw new HttpError(404, 'Corridor not found or inactive', 'CORRIDOR_NOT_FOUND');
+    throw new HttpError(404, 'Corridor not found', 'CORRIDOR_NOT_FOUND');
+  }
+  if (corridor.isActive === false) {
+    throw new HttpError(
+      409,
+      `Corridor ${corridor.code} is inactive and cannot open new bookings or pooling.`,
+      'CORRIDOR_INACTIVE'
+    );
   }
   if (!slot || !slot.corridorId.equals(corridor._id)) {
     throw new HttpError(404, 'Slot not found for the selected corridor', 'SLOT_NOT_FOUND');

@@ -15,6 +15,11 @@ import { TripEvent } from '../models/TripEvent.js';
 import { Vehicle } from '../models/Vehicle.js';
 import { evaluateBackhaulForTrip } from '../services/backhaulService.js';
 import { respondToTripAssignment } from '../services/driverAssignment.js';
+import {
+  listOpenPoolingSlotsForDriver,
+  submitDriverSlotCommitment,
+  withdrawDriverSlotCommitment,
+} from '../services/driverSlotService.js';
 import { reportTripException } from '../services/exceptionService.js';
 import { appendLoadingOverride } from '../services/loadingPlanService.js';
 import { optimizeAndPlanTripRoute } from '../services/routePlanningService.js';
@@ -58,7 +63,7 @@ const profileSchema = z.object({
   name: z.string().trim().min(2).max(120),
   phone: z.string().trim().min(8).max(20),
   availabilityStatus: z.enum(['AVAILABLE', 'ON_TRIP', 'OFFLINE']).default('AVAILABLE'),
-  fleetTier: z.enum(['TIER_1', 'TIER_2', 'TIER_3']).default('TIER_1'),
+  fleetTier: z.enum(['TIER_1', 'TIER_2', 'TIER_3']).default('TIER_2'),
   licenseNumber: z.string().trim().max(40).optional(),
   homeBase: z.string().trim().max(120).optional(),
   vehicleId: z.string().optional(),
@@ -85,6 +90,14 @@ router.put('/profile', async (req, res) => {
   }
 
   const data = parsed.data;
+  const existingProfile = await DriverProfile.findOne({ userId: req.auth!.userId });
+  if (data.fleetTier === 'TIER_1' && !existingProfile?.platformOwnerId) {
+    throw new HttpError(
+      403,
+      'Tier 1 contract drivers must be registered and owned by a Platform Owner account.',
+      'PLATFORM_OWNER_REQUIRED'
+    );
+  }
   if (data.vehicleId) {
     if (!isValidObjectId(data.vehicleId)) {
       throw new HttpError(400, 'Invalid vehicleId', 'VALIDATION_ERROR');
@@ -137,6 +150,68 @@ router.patch('/availability', async (req, res) => {
   res.json({
     success: true,
     driverProfile: profile,
+  });
+});
+
+router.get('/pooling-slots', async (req, res) => {
+  const result = await listOpenPoolingSlotsForDriver({
+    driverUserId: req.auth!.userId,
+  });
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.post('/pooling-slots/:slotId/commit', async (req, res) => {
+  const slotId = Array.isArray(req.params.slotId)
+    ? req.params.slotId[0]
+    : req.params.slotId;
+
+  const parsed = z
+    .object({
+      selectedReturnTime: z
+        .string()
+        .trim()
+        .regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Expected 24-hour HH:mm time')
+        .optional(),
+    })
+    .safeParse(req.body ?? {});
+
+  if (!parsed.success) {
+    throw new HttpError(
+      400,
+      'Invalid slot commitment payload',
+      'VALIDATION_ERROR',
+      parsed.error.flatten()
+    );
+  }
+
+  const result = await submitDriverSlotCommitment({
+    driverUserId: req.auth!.userId,
+    slotId,
+    selectedReturnTime: parsed.data.selectedReturnTime,
+  });
+
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.delete('/pooling-slots/:slotId/commit', async (req, res) => {
+  const slotId = Array.isArray(req.params.slotId)
+    ? req.params.slotId[0]
+    : req.params.slotId;
+
+  const result = await withdrawDriverSlotCommitment({
+    driverUserId: req.auth!.userId,
+    slotId,
+  });
+
+  res.json({
+    success: true,
+    ...result,
   });
 });
 

@@ -7,6 +7,10 @@ import { Slot } from '../models/Slot.js';
 import { emitPoolUpdated } from '../socket/poolGateway.js';
 import { HttpError } from '../utils/errors.js';
 import { allocateAndAssignTripForPool } from './driverAssignment.js';
+import {
+  resolveSlotTemplateForSlot,
+  validateCommitmentsAtWindowClose,
+} from './driverSlotService.js';
 import { issueTokenRefund } from './paymentService.js';
 import {
   addShipmentToPool,
@@ -263,8 +267,23 @@ export async function executePoolCutoff(params: {
       lockingPool.status = 'LOCKED';
       await lockingPool.save({ session: session ?? undefined });
 
+      const template = resolveSlotTemplateForSlot(corridor, slot);
+      if (template && !slot.scheduleSnapshot) {
+        slot.scheduleSnapshot = {
+          outboundPickupTime: template.outboundPickupTime,
+          returnTimeOptions:
+            slot.returnTimeOptions && slot.returnTimeOptions.length > 0
+              ? slot.returnTimeOptions
+              : template.returnTimeOptions,
+          defaultReturnTime: template.defaultReturnTime,
+          returnTimeLocked: Boolean(slot.returnTimeLocked ?? template.returnTimeLocked),
+          lockedReturnTime: slot.lockedReturnTime ?? template.lockedReturnTime,
+        };
+      }
       slot.status = 'LOCKED';
       await slot.save({ session: session ?? undefined });
+
+      await validateCommitmentsAtWindowClose({ slot, corridor, session });
 
       for (const s of shipments) {
         const snap = shipmentSnapshots.find((item) => item.shipmentId.equals(s._id))!;
