@@ -11,7 +11,7 @@ import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { DriverProfilePage } from './pages/driver/DriverProfilePage';
-import { DriverSectionPlaceholder } from './pages/driver/DriverSectionPlaceholder';
+import { DriverScanPage } from './pages/driver/DriverScanPage';
 import { DriverTripsPage } from './pages/driver/DriverTripsPage';
 import { BookShipmentPage } from './pages/shipper/BookShipmentPage';
 import { BusinessProfilePage } from './pages/shipper/BusinessProfilePage';
@@ -100,16 +100,7 @@ export function App() {
             }
           >
             <Route index element={<DriverTripsPage />} />
-            <Route
-              path="scan"
-              element={
-                <DriverSectionPlaceholder
-                  title="QR Pickup Verification"
-                  stageLabel="Stage 7 (MC-027)"
-                  description="Scan shipment QR codes to verify manifest loading and pickup events."
-                />
-              }
-            />
+            <Route path="scan" element={<DriverScanPage />} />
             <Route path="profile" element={<DriverProfilePage />} />
           </Route>
 

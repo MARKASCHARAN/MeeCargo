@@ -57,6 +57,12 @@ export function attachSocketGateway(server: HttpServer): Server {
         void socket.join(`driver:${driverId}`);
       }
     });
+
+    socket.on('join:shipment', (shipmentId: string) => {
+      if (typeof shipmentId === 'string' && shipmentId.length > 0) {
+        void socket.join(`shipment:${shipmentId}`);
+      }
+    });
   });
 
   return ioInstance;
@@ -82,4 +88,20 @@ export function emitDriverAssignment(
 ): void {
   if (!ioInstance) return;
   ioInstance.to(`driver:${driverId}`).emit('driver:assignment', payload);
+}
+
+export function emitShipmentProgress(
+  shipmentId: string,
+  payload: {
+    shipmentId: string;
+    reference: string;
+    status: string;
+    tripId?: string;
+    occurredAt: string;
+    note?: string;
+  }
+): void {
+  if (!ioInstance) return;
+  ioInstance.to(`shipment:${shipmentId}`).emit('shipment:updated', payload);
+  ioInstance.emit('shipments:changed', payload);
 }
