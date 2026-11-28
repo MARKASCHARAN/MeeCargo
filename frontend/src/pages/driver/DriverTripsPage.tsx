@@ -28,6 +28,7 @@ import {
 import {
   acceptTier2MarketplaceOpportunity,
   collectDriverPickupBalance,
+  declineTier2MarketplaceOpportunity,
   fetchDriverNotifications,
   fetchDriverProfile,
   fetchDriverTripExceptions,
@@ -44,6 +45,7 @@ import {
   updateDriverAvailability,
   updateDriverShipmentStatus,
   verifyDeliveryProof,
+  viewTier2MarketplaceOpportunity,
 } from '../../api/client';
 import { Tier2ApplicationPortalCard } from '../../components/driver/Tier2ApplicationPortalCard';
 import { TruckBedVisualizer } from '../../components/trip/TruckBedVisualizer';
@@ -160,13 +162,29 @@ export function DriverTripsPage() {
     enabled: isOnline && !isTier2Locked,
   });
 
+  const [expandedOppId, setExpandedOppId] = useState<string | null>(null);
+
   const acceptMarketplaceMutation = useMutation({
-    mutationFn: (tripId: string) => acceptTier2MarketplaceOpportunity(tripId),
+    mutationFn: (tripOrOppId: string) => acceptTier2MarketplaceOpportunity(tripOrOppId),
     onSuccess: (res) => {
       setErrorBanner(null);
-      setActionBanner(res.message);
+      setActionBanner(
+        res.message ??
+          `Marketplace job claimed (${res.trip?.tripCode ?? 'Trip ready'}). Earnings locked!`
+      );
       void queryClient.invalidateQueries({ queryKey: ['driver-marketplace-opportunities'] });
       void queryClient.invalidateQueries({ queryKey: ['driver-trips'] });
+      void queryClient.invalidateQueries({ queryKey: ['driver-tier2-earnings'] });
+    },
+    onError: (err: Error) => setErrorBanner(err.message),
+  });
+
+  const declineMarketplaceMutation = useMutation({
+    mutationFn: (opportunityId: string) =>
+      declineTier2MarketplaceOpportunity(opportunityId, 'Declined by driver from portal'),
+    onSuccess: () => {
+      setActionBanner('Marketplace offer declined and released to eligible pool.');
+      void queryClient.invalidateQueries({ queryKey: ['driver-marketplace-opportunities'] });
     },
     onError: (err: Error) => setErrorBanner(err.message),
   });
@@ -462,6 +480,8 @@ export function DriverTripsPage() {
   }
 
   const opportunities = marketplaceQuery.data?.opportunities ?? [];
+  const hybridOpportunities = marketplaceQuery.data?.marketplaceOpportunities ?? [];
+  const totalAvailableOpps = hybridOpportunities.length + opportunities.length;
 
   return (
     <div className="space-y-4">
@@ -501,17 +521,121 @@ export function DriverTripsPage() {
                 Marketplace Trip Opportunities
               </h2>
             </div>
-            <Badge variant="info">{opportunities.length} available</Badge>
+            <Badge variant="info">{totalAvailableOpps} available</Badge>
           </CardHeader>
           <CardContent className="space-y-3 pt-3">
             {marketplaceQuery.isLoading ? (
               <p className="text-xs text-slate-500">Checking eligible marketplace trips...</p>
-            ) : opportunities.length === 0 ? (
+            ) : totalAvailableOpps === 0 ? (
               <p className="text-xs text-slate-500">
                 No open Tier 2 marketplace opportunities right now. Assigned trips appear below.
               </p>
             ) : (
-              opportunities.map((opp) => (
+              <>
+                {hybridOpportunities.map((mOpp) => {
+                  const isExpanded = expandedOppId === mOpp.id;
+                  return (
+                    <div
+                      key={mOpp.id}
+                      className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 text-xs"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-mono font-bold text-emerald-800">
+                              {mOpp.opportunityCode}
+                            </span>
+                            <Badge variant="info">{mOpp.opportunityType}</Badge>
+                            {mOpp.driverOfferStatus ? (
+                              <Badge variant="neutral">{mOpp.driverOfferStatus}</Badge>
+                            ) : null}
+                          </div>
+                          <p className="mt-0.5 font-semibold text-slate-900">
+                            {mOpp.originLabel} → {mOpp.destinationLabel}
+                          </p>
+                          <p className="text-[11px] text-slate-600">
+                            {mOpp.stopsSummary.map((st) => st.name).join(' → ')}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] uppercase text-slate-500">Fixed Spot Payout</p>
+                          <p className="text-sm font-bold text-emerald-700">
+                            {formatPaise(mOpp.payoutQuote.spotPayoutPaise)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 rounded bg-white p-2 text-[11px] text-slate-700">
+                        <div>
+                          <span className="text-slate-400">Cargo:</span>{' '}
+                          <strong>{mOpp.cargoSummary.totalWeightKg} kg</strong> ({mOpp.cargoSummary.totalVolumeCbm} m³)
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Est. Route:</span>{' '}
+                          <strong>{mOpp.estimatedDistanceKm} km</strong> ({mOpp.estimatedDurationMin} min)
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Expires:</span>{' '}
+                          <strong>{new Date(mOpp.offerExpiresAt).toLocaleTimeString('en-IN')}</strong>
+                        </div>
+                      </div>
+
+                      {isExpanded ? (
+                        <div className="space-y-1 rounded border border-slate-200 bg-white p-2 text-[11px] text-slate-600">
+                          <p>
+                            <strong>Cargo Spec:</strong> {mOpp.cargoSummary.summaryLabel} • Max item:{' '}
+                            {mOpp.cargoSummary.maxUnitLengthCm}×{mOpp.cargoSummary.maxUnitWidthCm}×
+                            {mOpp.cargoSummary.maxUnitHeightCm} cm
+                          </p>
+                          <p>
+                            <strong>Pickup Deadline:</strong>{' '}
+                            {new Date(mOpp.pickupDeadlineAt).toLocaleString('en-IN')} •{' '}
+                            <strong>Delivery Deadline:</strong>{' '}
+                            {new Date(mOpp.deliveryDeadlineAt).toLocaleString('en-IN')}
+                          </p>
+                          <p className="text-slate-500">
+                            Shipper/recipient contact &amp; street address unlock automatically after acceptance. Fixed spot payout excludes Tier 1 guarantees.
+                          </p>
+                        </div>
+                      ) : null}
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (!isExpanded) {
+                              void viewTier2MarketplaceOpportunity(mOpp.id).catch(() => undefined);
+                            }
+                            setExpandedOppId(isExpanded ? null : mOpp.id);
+                          }}
+                        >
+                          {isExpanded ? 'Hide Details' : 'View Details'}
+                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={declineMarketplaceMutation.isPending}
+                            onClick={() => declineMarketplaceMutation.mutate(mOpp.id)}
+                          >
+                            Decline
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            disabled={acceptMarketplaceMutation.isPending}
+                            onClick={() => acceptMarketplaceMutation.mutate(mOpp.id)}
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Accept Job
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {opportunities.map((opp) => (
                 <div
                   key={opp._id}
                   className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-xs"
@@ -567,7 +691,8 @@ export function DriverTripsPage() {
                     )}
                   </div>
                 </div>
-              ))
+                ))}
+              </>
             )}
           </CardContent>
         </Card>

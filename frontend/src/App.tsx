@@ -15,14 +15,17 @@ import { DriverPoolingSlotsPage } from './pages/driver/DriverPoolingSlotsPage';
 import { DriverProfilePage } from './pages/driver/DriverProfilePage';
 import { DriverScanPage } from './pages/driver/DriverScanPage';
 import { DriverTripsPage } from './pages/driver/DriverTripsPage';
+import { DriverEarningsPage } from './pages/driver/DriverEarningsPage';
 import { BecomeDriverPage } from './pages/driver/BecomeDriverPage';
 import { DriverLoginPage } from './pages/driver/DriverLoginPage';
 import { Tier2ApplicationStatusPage } from './pages/driver/Tier2ApplicationStatusPage';
 import { Tier2DriverApplyPage } from './pages/driver/Tier2DriverApplyPage';
 import { CorridorSchedulesPage } from './pages/owner/CorridorSchedulesPage';
+import { OwnerMarketplacePage } from './pages/owner/OwnerMarketplacePage';
 import { PlatformOwnerDriversPage } from './pages/owner/PlatformOwnerDriversPage';
 import { Tier2ApplicationsPage } from './pages/owner/Tier2ApplicationsPage';
 import { BookShipmentPage } from './pages/shipper/BookShipmentPage';
+import { ExpressBookingPage } from './pages/shipper/ExpressBookingPage';
 import { BusinessProfilePage } from './pages/shipper/BusinessProfilePage';
 import { CorridorsPage } from './pages/shipper/CorridorsPage';
 import { CsvImportPage } from './pages/shipper/CsvImportPage';
@@ -98,6 +101,7 @@ export function App() {
           >
             <Route index element={<ShipperDashboardPage />} />
             <Route path="book" element={<BookShipmentPage />} />
+            <Route path="express" element={<ExpressBookingPage />} />
             <Route path="corridors" element={<CorridorsPage />} />
             <Route path="shipments" element={<ShipmentsHistoryPage />} />
             <Route path="import" element={<CsvImportPage />} />
@@ -114,6 +118,7 @@ export function App() {
           >
             <Route index element={<DriverTripsPage />} />
             <Route path="slots" element={<DriverPoolingSlotsPage />} />
+            <Route path="earnings" element={<DriverEarningsPage />} />
             <Route path="scan" element={<DriverScanPage />} />
             <Route path="profile" element={<DriverProfilePage />} />
           </Route>
@@ -129,6 +134,7 @@ export function App() {
             <Route index element={<PlatformOwnerDriversPage />} />
             <Route path="corridors" element={<CorridorSchedulesPage />} />
             <Route path="tier2-applications" element={<Tier2ApplicationsPage />} />
+            <Route path="marketplace" element={<OwnerMarketplacePage />} />
           </Route>
 
           <Route path="/track" element={<PublicTrackLayout />}>

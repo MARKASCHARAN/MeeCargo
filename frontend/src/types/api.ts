@@ -1117,3 +1117,162 @@ export interface ManagedContractDriver {
 export interface PlatformOwnerCatalog {
   corridors: CorridorScheduleRecord[];
 }
+
+export type MarketplaceOpportunityType =
+  | 'OVERFLOW'
+  | 'RIGHT_SIZING'
+  | 'EXPRESS'
+  | 'NEW_ROUTE';
+
+export interface HybridMarketplaceOpportunity {
+  id: string;
+  opportunityCode: string;
+  opportunityType: MarketplaceOpportunityType;
+  status: string;
+  offerVersion: number;
+  originLabel: string;
+  destinationLabel: string;
+  originStopCode: string;
+  deliveryStopCode: string;
+  stopsSummary: Array<{ stopCode: string; name: string; sequenceOrder: number }>;
+  serviceWindowStartAt: string;
+  pickupDeadlineAt: string;
+  deliveryDeadlineAt: string;
+  offerExpiresAt: string;
+  earlyFillFirstRefusalUntil?: string;
+  estimatedDistanceKm: number;
+  estimatedDurationMin: number;
+  cargoSummary: {
+    shipmentCount: number;
+    totalWeightKg: number;
+    totalVolumeCbm: number;
+    maxUnitLengthCm: number;
+    maxUnitWidthCm: number;
+    maxUnitHeightCm: number;
+    allStackable: boolean;
+    handlingRestrictions: string[];
+    summaryLabel: string;
+  };
+  payoutQuote: {
+    currency: 'INR';
+    spotPayoutPaise: number;
+    baseFeePaise: number;
+    distancePayPaise: number;
+    cargoAllowancePaise: number;
+    urgencyPremiumPaise: number;
+    approachAllowancePaise: number;
+    tollAllowancePaise: number;
+    tier1MinGuaranteeIncludedPaise: number;
+    policyVersion: string;
+  };
+  driverOfferStatus: string | null;
+  tripId?: string;
+  piiUnlocked: boolean;
+  assignedStopContacts?: Array<{
+    shipmentId: string;
+    reference: string;
+    pickupContact: { name: string; phone: string } | null;
+    pickupAddress: StructuredAddress;
+    recipientName: string;
+    recipientPhone: string;
+    deliveryAddress: StructuredAddress;
+  }>;
+}
+
+export type Tier2EarningStatus =
+  | 'OFFERED'
+  | 'ACCEPTED'
+  | 'TRIP_COMPLETED'
+  | 'PENDING_SETTLEMENT'
+  | 'PAID'
+  | 'ON_HOLD'
+  | 'DISPUTED'
+  | 'REVERSED';
+
+export interface Tier2EarningRecord {
+  _id: string;
+  earningCode: string;
+  opportunityType: MarketplaceOpportunityType;
+  status: Tier2EarningStatus;
+  currency: 'INR';
+  grossPayoutPaise: number;
+  adjustmentsPaise: number;
+  netPayablePaise: number;
+  policyVersion: string;
+  isSimulated: boolean;
+  settlementRef?: string;
+  settledAt?: string;
+  completedAt?: string;
+  holdOrDisputeReason?: string;
+  reversalReason?: string;
+  createdAt: string;
+  tripId?: { _id: string; tripCode: string; status: string };
+  driverUserId?: { _id: string; name: string; email: string };
+  opportunityId?: {
+    _id: string;
+    opportunityCode: string;
+    opportunityType: MarketplaceOpportunityType;
+    originLabel: string;
+    destinationLabel: string;
+  };
+}
+
+export interface Tier2DriverEarningsResponse {
+  success: boolean;
+  summary: {
+    currency: 'INR';
+    isSimulated: boolean;
+    totalEarnedPaise: number;
+    pendingSettlementPaise: number;
+    paidPaise: number;
+    activeAcceptedPaise: number;
+    onHoldOrDisputedPaise: number;
+    completedTripsCount: number;
+  };
+  earnings: Tier2EarningRecord[];
+}
+
+export interface MarketplacePolicyRecord {
+  policyVersion: string;
+  isActive: boolean;
+  enabledOpportunityTypes: MarketplaceOpportunityType[];
+  earlyFillFirstRefusalMin: number;
+  offerExpiryMin: number;
+  maxActiveOffersPerOpportunity: number;
+  overflowMinChargeableWeightKg: number;
+  overflowMinVolumeCbm: number;
+  rightSizingMinNetSavingsPaise: number;
+  newRouteViabilityThresholdPct: number;
+  minContributionPaise: number;
+  maxNewRouteDetourPct: number;
+  payoutPolicy: {
+    baseDispatchFeePaise: number;
+    defaultPerKmPaise: number;
+    perKmByBodyTypePaise: Record<VehicleBodyType, number>;
+    weightSurchargePaisePerKg: number;
+    volumeSurchargePaisePerCbm: number;
+    expressUrgencyMultiplierBps: number;
+    approachAllowancePaisePerKm: number;
+    maxApproachBillableKm: number;
+    defaultTollAllowancePaise: number;
+  };
+  expressPricing: {
+    baseFeePaise: number;
+    ratePaisePerKm: number;
+    chargeableKgRatePaise: number;
+    minCustomerChargePaise: number;
+    platformMinMarginPaise: number;
+  };
+}
+
+export interface ExpressMarketplaceQuote {
+  serviceType: 'EXPRESS_MARKETPLACE' | 'NEW_ROUTE_MARKETPLACE';
+  compatibleVehicleCount: number;
+  estimatedDistanceKm: number;
+  estimatedDurationMin: number;
+  customerChargePaise: number;
+  estimatedSpotPayoutPaise: number;
+  platformMarginPaise: number;
+  policyVersion: string;
+  cargo: CargoCalculationResult;
+}

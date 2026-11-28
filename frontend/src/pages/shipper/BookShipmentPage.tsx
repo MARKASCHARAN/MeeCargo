@@ -468,11 +468,18 @@ export function BookShipmentPage() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Book Shipment</h1>
-        <p className="text-sm text-slate-500">
-          Pickup defaults to your business profile ({business.businessName}).
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Book Shipment</h1>
+          <p className="text-sm text-slate-500">
+            Pickup defaults to your business profile ({business.businessName}).
+          </p>
+        </div>
+        <Link to="/shipper/express">
+          <Button type="button" variant="outline" size="sm">
+            Urgent One-Way Express Dispatch →
+          </Button>
+        </Link>
       </div>
 
       {formError ? (

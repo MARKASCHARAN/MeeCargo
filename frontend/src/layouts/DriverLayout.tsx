@@ -8,6 +8,7 @@ import {
   QrCode,
   Truck,
   UserCheck,
+  Wallet,
 } from 'lucide-react';
 import { cn } from '../lib/cn';
 import { fetchDriverProfile, logoutUser } from '../api/client';
@@ -37,6 +38,7 @@ export function DriverLayout() {
     : isTier2
       ? [
           { to: '/driver', label: 'Marketplace', icon: ClipboardList, end: true },
+          { to: '/driver/earnings', label: 'Earnings', icon: Wallet, end: false },
           { to: '/driver/scan', label: 'Scan QR', icon: QrCode, end: false },
           { to: '/driver/profile', label: 'Profile', icon: UserCheck, end: false },
         ]

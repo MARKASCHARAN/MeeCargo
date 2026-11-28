@@ -1069,19 +1069,149 @@ export function submitDriverTier2Application(
 
 export function fetchTier2MarketplaceOpportunities(): Promise<{
   success: boolean;
+  eligible?: boolean;
+  ineligibilityReason?: string;
+  marketplaceOpportunities?: import('../types/api').HybridMarketplaceOpportunity[];
   opportunities: import('../types/api').Tier2MarketplaceOpportunity[];
   vehicle: import('../types/api').VehicleSummary | null;
 }> {
   return apiFetch('/api/v1/driver/marketplace-opportunities');
 }
 
-export function acceptTier2MarketplaceOpportunity(tripId: string): Promise<{
+export function viewTier2MarketplaceOpportunity(opportunityId: string): Promise<{
+  success: boolean;
+  opportunity: import('../types/api').HybridMarketplaceOpportunity;
+}> {
+  return apiFetch(`/api/v1/driver/marketplace-opportunities/${opportunityId}/view`, {
+    method: 'POST',
+  });
+}
+
+export function acceptTier2MarketplaceOpportunity(tripOrOppId: string): Promise<{
   success: boolean;
   trip: TripSummary;
-  message: string;
+  message?: string;
+  opportunity?: import('../types/api').HybridMarketplaceOpportunity;
+  earning?: import('../types/api').Tier2EarningRecord;
 }> {
-  return apiFetch(`/api/v1/driver/marketplace-opportunities/${tripId}/accept`, {
+  return apiFetch(`/api/v1/driver/marketplace-opportunities/${tripOrOppId}/accept`, {
     method: 'POST',
+  });
+}
+
+export function declineTier2MarketplaceOpportunity(
+  opportunityId: string,
+  reason?: string
+): Promise<{ success: boolean; declined: boolean }> {
+  return apiFetch(`/api/v1/driver/marketplace-opportunities/${opportunityId}/decline`, {
+    method: 'POST',
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+export function fetchDriverTier2Earnings(): Promise<
+  import('../types/api').Tier2DriverEarningsResponse
+> {
+  return apiFetch('/api/v1/driver/marketplace-earnings');
+}
+
+export function releaseDriverTripForReassignment(
+  tripId: string,
+  reason: string
+): Promise<{ success: boolean; dispatchedCount: number }> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/release-reassignment`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function quoteExpressMarketplaceBooking(payload: Record<string, unknown>): Promise<{
+  success: boolean;
+  quote: import('../types/api').ExpressMarketplaceQuote;
+}> {
+  return apiFetch('/api/v1/shipments/marketplace/quote', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createExpressMarketplaceBooking(payload: Record<string, unknown>): Promise<{
+  success: boolean;
+  shipment: Shipment;
+  opportunity?: { opportunityCode: string };
+  dispatchedCount?: number;
+}> {
+  return apiFetch('/api/v1/shipments/marketplace/bookings', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchOwnerMarketplacePolicy(): Promise<{
+  success: boolean;
+  policy: import('../types/api').MarketplacePolicyRecord;
+}> {
+  return apiFetch('/api/v1/platform-owner/marketplace-policy');
+}
+
+export function updateOwnerMarketplacePolicy(
+  updates: Partial<import('../types/api').MarketplacePolicyRecord>
+): Promise<{
+  success: boolean;
+  policy: import('../types/api').MarketplacePolicyRecord;
+}> {
+  return apiFetch('/api/v1/platform-owner/marketplace-policy', {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+}
+
+export function fetchOwnerMarketplaceOpportunities(): Promise<{
+  success: boolean;
+  opportunities: Array<{
+    _id: string;
+    opportunityCode: string;
+    opportunityType: import('../types/api').MarketplaceOpportunityType;
+    status: string;
+    originLabel: string;
+    destinationLabel: string;
+    payoutQuote: { spotPayoutPaise: number };
+  }>;
+}> {
+  return apiFetch('/api/v1/platform-owner/marketplace-opportunities');
+}
+
+export function reassignOwnerOpportunity(
+  opportunityId: string,
+  reason: string
+): Promise<{ success: boolean; dispatchedCount: number }> {
+  return apiFetch(`/api/v1/platform-owner/marketplace-opportunities/${opportunityId}/reassign`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function fetchOwnerTier2Earnings(): Promise<{
+  success: boolean;
+  totals: {
+    totalRecords: number;
+    pendingSettlementPaise: number;
+    paidPaise: number;
+    onHoldPaise: number;
+    acceptedPaise: number;
+  };
+  earnings: import('../types/api').Tier2EarningRecord[];
+}> {
+  return apiFetch('/api/v1/platform-owner/tier2-earnings');
+}
+
+export function settleOwnerTier2Earning(earningId: string): Promise<{
+  success: boolean;
+  earning: import('../types/api').Tier2EarningRecord;
+}> {
+  return apiFetch(`/api/v1/platform-owner/tier2-earnings/${earningId}/settle`, {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }
 
