@@ -405,16 +405,143 @@ export interface VehicleSummary {
   };
 }
 
+export type Tier2ApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type IdProofType = 'AADHAAR' | 'PAN' | 'PASSPORT' | 'VOTER_ID';
+
 export interface DriverProfile {
   _id: string;
   userId: string;
   name: string;
   phone: string;
   availabilityStatus: DriverAvailability;
+  accountStatus?: DriverAccountStatus;
   fleetTier: FleetTier;
+  tier2ApplicationStatus?: Tier2ApplicationStatus;
+  tier2ApplicationId?: string;
   vehicleId?: VehicleSummary | null;
   licenseNumber?: string;
   homeBase?: string;
+}
+
+export interface Tier2UploadedDocument {
+  docType: 'DRIVING_LICENSE' | 'IDENTITY_PROOF' | 'VEHICLE_RC' | 'INSURANCE_POLICY';
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  storageKey: string;
+  uploadedAt: string;
+}
+
+export interface Tier2VerificationPolicy {
+  requiredDocuments: Array<{
+    docType: Tier2UploadedDocument['docType'];
+    fieldName: 'licenseFile' | 'idProofFile' | 'rcFile' | 'insuranceFile';
+    label: string;
+    required: boolean;
+  }>;
+  allowedMimeTypes: string[];
+  maxFileSizeBytes: number;
+  payoutPolicySummary: string;
+}
+
+export interface PublicTier2StatusSummary {
+  applicationRef: string;
+  status: Tier2ApplicationStatus;
+  appliedAt: string;
+  reviewedAt?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  rejectionReason?: string;
+  vehicleRegistrationNumber: string;
+  vehicleCategory: string;
+  documentsVerificationStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  uploadedDocumentsCount: number;
+  nextSteps: string;
+}
+
+export interface Tier2DriverApplicationRecord {
+  _id: string;
+  applicationRef?: string;
+  userId: string;
+  driverProfileId?: string;
+  vehicleId?: string | { _id: string; registrationNumber: string; operationalStatus: string; isAvailable: boolean };
+  fullName: string;
+  email: string;
+  phone: string;
+  address: {
+    addressLine: string;
+    cityOrTown: string;
+    district: string;
+    state: string;
+    pincode: string;
+  };
+  identity: {
+    licenseNumber: string;
+    idProofType: IdProofType;
+    idProofNumber: string;
+  };
+  vehicle: {
+    registrationNumber: string;
+    vehicleCategory: string;
+    bodyType: VehicleBodyType;
+    maxWeightKg: number;
+    bedLengthCm: number;
+    bedWidthCm: number;
+    bedHeightCm: number;
+    maxVolumeCbm: number;
+    perKmRatePaise: number;
+  };
+  documents: {
+    rcNumber: string;
+    insurancePolicyNumber: string;
+    insuranceValidUntil?: string;
+    fitnessValidUntil?: string;
+    permitNotes?: string;
+    verificationStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
+    verifiedAt?: string;
+  };
+  uploadedDocuments?: Tier2UploadedDocument[];
+  status: Tier2ApplicationStatus;
+  appliedAt: string;
+  reviewedByUserId?: string | { _id: string; name: string; email: string };
+  reviewedAt?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  rejectionReason?: string;
+  reviewNote?: string;
+  resubmissionCount: number;
+  decisionHistory: Array<{
+    action: 'SUBMITTED' | 'RESUBMITTED' | 'APPROVED' | 'REJECTED';
+    status: Tier2ApplicationStatus;
+    actorUserId: string;
+    at: string;
+    note?: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Tier2MarketplaceOpportunity {
+  _id: string;
+  tripCode: string;
+  status: string;
+  corridor?: {
+    _id: string;
+    code: string;
+    name: string;
+    stops?: CorridorStopSummary[];
+  };
+  plannedDepartureAt: string;
+  estimatedEndAt: string;
+  stopsSummary: Array<{ stopCode: string; name: string; sequenceOrder: number }>;
+  shipmentCount: number;
+  totalChargeableWeightKg: number;
+  totalVolumeCbm: number;
+  estimatedDistanceKm: number;
+  estimatedPayoutPaise: number;
+  isAssignedToMe: boolean;
+  eligibleToAccept: boolean;
+  ineligibleReason?: string;
 }
 
 export interface TripSummary {

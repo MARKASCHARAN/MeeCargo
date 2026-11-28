@@ -15,8 +15,13 @@ import { DriverPoolingSlotsPage } from './pages/driver/DriverPoolingSlotsPage';
 import { DriverProfilePage } from './pages/driver/DriverProfilePage';
 import { DriverScanPage } from './pages/driver/DriverScanPage';
 import { DriverTripsPage } from './pages/driver/DriverTripsPage';
+import { BecomeDriverPage } from './pages/driver/BecomeDriverPage';
+import { DriverLoginPage } from './pages/driver/DriverLoginPage';
+import { Tier2ApplicationStatusPage } from './pages/driver/Tier2ApplicationStatusPage';
+import { Tier2DriverApplyPage } from './pages/driver/Tier2DriverApplyPage';
 import { CorridorSchedulesPage } from './pages/owner/CorridorSchedulesPage';
 import { PlatformOwnerDriversPage } from './pages/owner/PlatformOwnerDriversPage';
+import { Tier2ApplicationsPage } from './pages/owner/Tier2ApplicationsPage';
 import { BookShipmentPage } from './pages/shipper/BookShipmentPage';
 import { BusinessProfilePage } from './pages/shipper/BusinessProfilePage';
 import { CorridorsPage } from './pages/shipper/CorridorsPage';
@@ -78,6 +83,10 @@ export function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/become-a-driver" element={<BecomeDriverPage />} />
+          <Route path="/driver/login" element={<DriverLoginPage />} />
+          <Route path="/driver/apply" element={<Tier2DriverApplyPage />} />
+          <Route path="/driver/application-status" element={<Tier2ApplicationStatusPage />} />
 
           <Route
             path="/shipper"
@@ -119,6 +128,7 @@ export function App() {
           >
             <Route index element={<PlatformOwnerDriversPage />} />
             <Route path="corridors" element={<CorridorSchedulesPage />} />
+            <Route path="tier2-applications" element={<Tier2ApplicationsPage />} />
           </Route>
 
           <Route path="/track" element={<PublicTrackLayout />}>

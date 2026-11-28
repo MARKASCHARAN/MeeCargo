@@ -54,7 +54,7 @@ export function RegisterPage() {
         accessToken: res.accessToken,
         refreshToken: res.refreshToken,
       });
-      navigate(res.user.role === 'SHIPPER' ? '/shipper/profile' : '/driver/profile', {
+      navigate(res.user.role === 'SHIPPER' ? '/shipper/profile' : '/driver', {
         replace: true,
       });
     } catch (error) {
@@ -121,6 +121,20 @@ export function RegisterPage() {
                   Driver
                 </button>
               </div>
+              {selectedRole === 'DRIVER' ? (
+                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 space-y-1">
+                  <p>
+                    Public driver registration creates a Tier 2 Marketplace applicant account (reviewed by Platform Owner).
+                  </p>
+                  <p>
+                    Ready with your vehicle specs &amp; documents?{' '}
+                    <Link to="/driver/apply" className="font-semibold underline">
+                      Complete full Tier 2 application here
+                    </Link>
+                    .
+                  </p>
+                </div>
+              ) : null}
             </div>
 
             <div>

@@ -41,6 +41,18 @@ export function LandingPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <Link
+              to="/become-a-driver"
+              className="hidden text-xs font-semibold text-emerald-700 hover:text-emerald-800 sm:inline"
+            >
+              Become a Driver
+            </Link>
+            <Link
+              to="/driver/application-status"
+              className="hidden text-xs font-medium text-slate-600 hover:text-slate-900 md:inline"
+            >
+              Application Status
+            </Link>
             {healthQuery.isLoading ? (
               <Badge variant="neutral">Checking API...</Badge>
             ) : healthQuery.isError ? (
@@ -124,12 +136,22 @@ export function LandingPage() {
                   of delivery, and offline event sync.
                 </p>
               </div>
-              <Link to="/driver" className="mt-5 inline-block">
-                <Button variant="secondary" size="sm" className="w-full justify-between">
-                  Open Driver App
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
+              <div className="mt-5 flex flex-col gap-2">
+                <Link to="/driver/login" className="inline-block">
+                  <Button variant="secondary" size="sm" className="w-full justify-between">
+                    Driver Login / Portal
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+                <div className="flex items-center justify-between text-xs font-medium">
+                  <Link to="/become-a-driver" className="text-emerald-700 hover:underline">
+                    Become a Driver
+                  </Link>
+                  <Link to="/driver/application-status" className="text-slate-600 hover:underline">
+                    Track Application
+                  </Link>
+                </div>
+              </div>
             </CardContent>
           </Card>
 

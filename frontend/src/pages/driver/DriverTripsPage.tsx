@@ -26,11 +26,13 @@ import {
   X,
 } from 'lucide-react';
 import {
+  acceptTier2MarketplaceOpportunity,
   collectDriverPickupBalance,
   fetchDriverNotifications,
   fetchDriverProfile,
   fetchDriverTripExceptions,
   fetchDriverTrips,
+  fetchTier2MarketplaceOpportunities,
   generateDeliveryOtp,
   markDriverNotificationRead,
   reportDriverTripException,
@@ -43,6 +45,7 @@ import {
   updateDriverShipmentStatus,
   verifyDeliveryProof,
 } from '../../api/client';
+import { Tier2ApplicationPortalCard } from '../../components/driver/Tier2ApplicationPortalCard';
 import { TruckBedVisualizer } from '../../components/trip/TruckBedVisualizer';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -130,6 +133,11 @@ export function DriverTripsPage() {
     enabled: isOnline,
   });
 
+  const driverProfile = profileQuery.data?.driverProfile ?? null;
+  const isTier2 = driverProfile?.fleetTier === 'TIER_2';
+  const isTier2Approved = isTier2 && driverProfile?.tier2ApplicationStatus === 'APPROVED';
+  const isTier2Locked = isTier2 && driverProfile?.tier2ApplicationStatus !== 'APPROVED';
+
   const tripsQuery = useQuery({
     queryKey: ['driver-trips'],
     queryFn: async () => {
@@ -137,13 +145,30 @@ export function DriverTripsPage() {
       await cacheTripsOffline(res.trips).catch(() => undefined);
       return res;
     },
-    enabled: isOnline,
+    enabled: isOnline && !isTier2Locked,
+  });
+
+  const marketplaceQuery = useQuery({
+    queryKey: ['driver-marketplace-opportunities'],
+    queryFn: fetchTier2MarketplaceOpportunities,
+    enabled: isOnline && isTier2Approved,
   });
 
   const notificationsQuery = useQuery({
     queryKey: ['driver-notifications'],
     queryFn: fetchDriverNotifications,
-    enabled: isOnline,
+    enabled: isOnline && !isTier2Locked,
+  });
+
+  const acceptMarketplaceMutation = useMutation({
+    mutationFn: (tripId: string) => acceptTier2MarketplaceOpportunity(tripId),
+    onSuccess: (res) => {
+      setErrorBanner(null);
+      setActionBanner(res.message);
+      void queryClient.invalidateQueries({ queryKey: ['driver-marketplace-opportunities'] });
+      void queryClient.invalidateQueries({ queryKey: ['driver-trips'] });
+    },
+    onError: (err: Error) => setErrorBanner(err.message),
   });
 
   const reloadOfflineState = async () => {
@@ -428,13 +453,27 @@ export function DriverTripsPage() {
   const pendingCount = offlineQueue.filter((e) => e.syncStatus === 'PENDING').length;
   const conflictCount = offlineQueue.filter((e) => e.syncStatus === 'CONFLICT').length;
 
+  if (isOnline && profileQuery.isLoading) {
+    return <LoadingState title="Loading driver workspace..." />;
+  }
+
+  if (isTier2Locked) {
+    return <Tier2ApplicationPortalCard />;
+  }
+
+  const opportunities = marketplaceQuery.data?.opportunities ?? [];
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Assigned Trips</h1>
+          <h1 className="text-xl font-bold text-slate-900">
+            {isTier2Approved ? 'Marketplace & Trips' : 'Assigned Trips'}
+          </h1>
           <p className="text-xs text-slate-500">
-            Mobile PWA • Cached offline in IndexedDB
+            {isTier2Approved
+              ? 'Tier 2 Independent Marketplace • Cached offline in IndexedDB'
+              : 'Mobile PWA • Cached offline in IndexedDB'}
           </p>
         </div>
 
@@ -452,6 +491,87 @@ export function DriverTripsPage() {
           <option value="OFFLINE">Offline</option>
         </select>
       </div>
+
+      {isTier2Approved ? (
+        <Card className="border-emerald-200">
+          <CardHeader className="flex items-center justify-between border-b border-slate-100 py-3">
+            <div className="flex items-center gap-2">
+              <Truck className="h-4 w-4 text-emerald-700" />
+              <h2 className="text-sm font-bold text-slate-900">
+                Marketplace Trip Opportunities
+              </h2>
+            </div>
+            <Badge variant="info">{opportunities.length} available</Badge>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-3">
+            {marketplaceQuery.isLoading ? (
+              <p className="text-xs text-slate-500">Checking eligible marketplace trips...</p>
+            ) : opportunities.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                No open Tier 2 marketplace opportunities right now. Assigned trips appear below.
+              </p>
+            ) : (
+              opportunities.map((opp) => (
+                <div
+                  key={opp._id}
+                  className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-xs"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-mono font-bold text-emerald-800">{opp.tripCode}</p>
+                      <p className="font-semibold text-slate-900">
+                        {opp.corridor ? `${opp.corridor.code} — ${opp.corridor.name}` : 'Corridor Trip'}
+                      </p>
+                      <p className="text-[11px] text-slate-600">
+                        {opp.stopsSummary.map((st) => st.name).join(' → ')}
+                      </p>
+                    </div>
+                    <Badge variant={opp.eligibleToAccept ? 'success' : 'warning'}>
+                      {opp.isAssignedToMe ? 'OFFERED' : 'OPEN'}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 rounded bg-white p-2 text-[11px] text-slate-700">
+                    <div>
+                      <span className="text-slate-400">Cargo:</span>{' '}
+                      <strong>{opp.totalChargeableWeightKg} kg</strong> ({opp.totalVolumeCbm} m³)
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Shipments:</span>{' '}
+                      <strong>{opp.shipmentCount}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Est. Payout:</span>{' '}
+                      <strong className="text-emerald-700">{formatPaise(opp.estimatedPayoutPaise)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-500">
+                      Departs: {new Date(opp.plannedDepartureAt).toLocaleString('en-IN')}
+                    </span>
+                    {opp.eligibleToAccept ? (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={acceptMarketplaceMutation.isPending}
+                        onClick={() => acceptMarketplaceMutation.mutate(opp._id)}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Accept Opportunity
+                      </Button>
+                    ) : (
+                      <span className="text-[11px] font-medium text-rose-700">
+                        {opp.ineligibleReason}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {!isOnline ? (
         <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">

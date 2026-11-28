@@ -31,9 +31,11 @@ import type {
   PlatformOwnerCatalog,
   PoolSummary,
   PriceCalculationBreakdown,
+  PublicTier2StatusSummary,
   PublicTrackingResponse,
   Shipment,
   StructuredAddress,
+  Tier2VerificationPolicy,
   TripSummary,
   UserRole,
   VehicleBodyType,
@@ -299,6 +301,7 @@ export function fetchOperationalImpactMetrics(): Promise<{
 
 export function createShipment(payload: {
   corridorId: string;
+  serviceType?: 'STANDARD_SCHEDULED_SHARED_POOL';
   serviceDate?: string;
   slotId?: string;
   pickupStopCode: string;
@@ -1005,4 +1008,203 @@ export function withdrawDriverPoolingSlot(
   return apiFetch(`/api/v1/driver/pooling-slots/${slotId}/commit`, {
     method: 'DELETE',
   });
+}
+
+export interface Tier2ApplicationSubmitPayload {
+  fullName: string;
+  phone: string;
+  address: {
+    addressLine: string;
+    cityOrTown: string;
+    district: string;
+    state: string;
+    pincode: string;
+  };
+  identity: {
+    licenseNumber: string;
+    idProofType: 'AADHAAR' | 'PAN' | 'PASSPORT' | 'VOTER_ID';
+    idProofNumber: string;
+  };
+  vehicle: {
+    registrationNumber: string;
+    vehicleCategory: string;
+    bodyType: VehicleBodyType;
+    maxWeightKg: number;
+    bedLengthCm: number;
+    bedWidthCm: number;
+    bedHeightCm: number;
+    maxVolumeCbm?: number;
+    perKmRatePaise?: number;
+  };
+  documents: {
+    rcNumber: string;
+    insurancePolicyNumber: string;
+    insuranceValidUntil?: string;
+    fitnessValidUntil?: string;
+    permitNotes?: string;
+  };
+}
+
+export function fetchDriverTier2Application(): Promise<{
+  success: boolean;
+  driverProfile: DriverProfile | null;
+  application: import('../types/api').Tier2DriverApplicationRecord | null;
+  applicationStatus: import('../types/api').Tier2ApplicationStatus;
+}> {
+  return apiFetch('/api/v1/driver/tier2-application');
+}
+
+export function submitDriverTier2Application(
+  payload: Tier2ApplicationSubmitPayload
+): Promise<{
+  success: boolean;
+  application: import('../types/api').Tier2DriverApplicationRecord;
+  driverProfile: DriverProfile;
+}> {
+  return apiFetch('/api/v1/driver/tier2-application', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchTier2MarketplaceOpportunities(): Promise<{
+  success: boolean;
+  opportunities: import('../types/api').Tier2MarketplaceOpportunity[];
+  vehicle: import('../types/api').VehicleSummary | null;
+}> {
+  return apiFetch('/api/v1/driver/marketplace-opportunities');
+}
+
+export function acceptTier2MarketplaceOpportunity(tripId: string): Promise<{
+  success: boolean;
+  trip: TripSummary;
+  message: string;
+}> {
+  return apiFetch(`/api/v1/driver/marketplace-opportunities/${tripId}/accept`, {
+    method: 'POST',
+  });
+}
+
+export function fetchOwnerTier2Applications(params?: {
+  status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
+  search?: string;
+}): Promise<{
+  success: boolean;
+  applications: import('../types/api').Tier2DriverApplicationRecord[];
+  counts: { pending: number; approved: number; rejected: number; total: number };
+}> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status);
+  if (params?.search) qs.set('search', params.search);
+  const query = qs.toString();
+  return apiFetch(`/api/v1/platform-owner/tier2-applications${query ? `?${query}` : ''}`);
+}
+
+export function approveOwnerTier2Application(
+  applicationId: string,
+  reviewNote?: string
+): Promise<{
+  success: boolean;
+  application: import('../types/api').Tier2DriverApplicationRecord;
+}> {
+  return apiFetch(`/api/v1/platform-owner/tier2-applications/${applicationId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(reviewNote ? { reviewNote } : {}),
+  });
+}
+
+export function rejectOwnerTier2Application(
+  applicationId: string,
+  reason: string
+): Promise<{
+  success: boolean;
+  application: import('../types/api').Tier2DriverApplicationRecord;
+}> {
+  return apiFetch(`/api/v1/platform-owner/tier2-applications/${applicationId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function fetchPublicTier2Policy(): Promise<{
+  success: boolean;
+  policy: Tier2VerificationPolicy;
+}> {
+  return apiFetch('/api/v1/public/tier2/policy');
+}
+
+export async function submitPublicTier2Application(formData: FormData): Promise<
+  AuthResponse & {
+    applicationRef: string;
+    status: import('../types/api').Tier2ApplicationStatus;
+    appliedAt: string;
+    uploadedDocumentsCount: number;
+  }
+> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/public/tier2/apply`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      data?.error ?? `Application failed with status ${response.status}`,
+      data?.code
+    );
+  }
+  return data;
+}
+
+export function lookupPublicTier2Status(payload: {
+  applicationRef: string;
+  email: string;
+}): Promise<
+  {
+    success: boolean;
+  } & PublicTier2StatusSummary
+> {
+  return apiFetch('/api/v1/public/tier2/application-status', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function openAuthenticatedDriverDocument(
+  path: string,
+  allowRetry = true
+): Promise<void> {
+  const token = useAuthStore.getState().accessToken;
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: 'include',
+    headers,
+  });
+
+  if (response.status === 401 && allowRetry) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      return openAuthenticatedDriverDocument(path, false);
+    }
+  }
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new ApiError(
+      response.status,
+      data?.error ?? `Unable to open document (${response.status})`,
+      data?.code
+    );
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  window.open(objectUrl, '_blank', 'noopener,noreferrer');
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }

@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  AlertTriangle,
   Box,
   Calculator,
   CheckCircle2,
   CreditCard,
+  Lock,
   MapPin,
   Navigation,
 } from 'lucide-react';
@@ -29,11 +31,26 @@ import { formatPaise } from '../../lib/format';
 import type {
   CargoCalculationResult,
   CargoCategory,
+  CorridorStop,
   DimensionUnit,
-  PaymentChoice,
   PriceCalculationBreakdown,
   WeightUnit,
 } from '../../types/api';
+
+const MAX_DROP_ZONE_RADIUS_KM = 30;
+
+function haversineDistanceKm(a: [number, number], b: [number, number]): number {
+  const [lng1, lat1] = a;
+  const [lng2, lat2] = b;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * sinLng * sinLng;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
 
 function makeIdempotencyKey(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -69,7 +86,6 @@ export function BookShipmentPage() {
 
   const [corridorId, setCorridorId] = useState(searchParams.get('corridorId') ?? '');
   const [serviceDate, setServiceDate] = useState(searchParams.get('serviceDate') ?? '');
-  const [pickupStopCode, setPickupStopCode] = useState('');
   const [deliveryStopCode, setDeliveryStopCode] = useState('');
 
   const [recipientName, setRecipientName] = useState('');
@@ -96,9 +112,6 @@ export function BookShipmentPage() {
   const [declaredContents, setDeclaredContents] = useState('');
   const [handlingNotes, setHandlingNotes] = useState('');
   const [irregularCargoNotes, setIrregularCargoNotes] = useState('');
-  const [paymentChoice, setPaymentChoice] = useState<PaymentChoice>(
-    'TOKEN_PLUS_PICKUP_BALANCE'
-  );
   const [bookingIdempotencyKey] = useState(() => makeIdempotencyKey('bk'));
   const [paymentIdempotencyKey] = useState(() => makeIdempotencyKey('pay'));
 
@@ -123,25 +136,68 @@ export function BookShipmentPage() {
     return openDate?.serviceDate ?? '';
   }, [serviceDate, selectedCorridor]);
 
-  const effectivePickupStopCode = useMemo(() => {
-    if (
-      pickupStopCode &&
-      selectedCorridor?.stops.some((s) => s.stopCode === pickupStopCode)
-    ) {
-      return pickupStopCode;
-    }
-    return selectedCorridor?.stops[0]?.stopCode ?? '';
-  }, [pickupStopCode, selectedCorridor]);
+  const orderedStops = useMemo(
+    () =>
+      [...(selectedCorridor?.stops ?? [])].sort(
+        (a, b) => a.sequenceOrder - b.sequenceOrder
+      ),
+    [selectedCorridor]
+  );
+
+  const originStop = orderedStops[0] ?? null;
+
+  const downstreamStops = useMemo(
+    () =>
+      originStop
+        ? orderedStops.filter((s) => s.sequenceOrder > originStop.sequenceOrder)
+        : [],
+    [orderedStops, originStop]
+  );
+
+  const effectivePickupStopCode = originStop?.stopCode ?? '';
 
   const effectiveDeliveryStopCode = useMemo(() => {
     if (
       deliveryStopCode &&
-      selectedCorridor?.stops.some((s) => s.stopCode === deliveryStopCode)
+      downstreamStops.some((s) => s.stopCode === deliveryStopCode)
     ) {
       return deliveryStopCode;
     }
-    return selectedCorridor?.stops[1]?.stopCode ?? '';
-  }, [deliveryStopCode, selectedCorridor]);
+    return downstreamStops[0]?.stopCode ?? '';
+  }, [deliveryStopCode, downstreamStops]);
+
+  const selectedDeliveryStop = useMemo(
+    () =>
+      downstreamStops.find((s) => s.stopCode === effectiveDeliveryStopCode) ?? null,
+    [downstreamStops, effectiveDeliveryStopCode]
+  );
+
+  const dropZoneDistanceKm = useMemo(() => {
+    const stopCoords = selectedDeliveryStop?.location?.coordinates;
+    if (
+      !stopCoords ||
+      stopCoords.length !== 2 ||
+      (stopCoords[0] === 0 && stopCoords[1] === 0)
+    ) {
+      return null;
+    }
+    return haversineDistanceKm(deliveryCoords, stopCoords);
+  }, [deliveryCoords, selectedDeliveryStop]);
+
+  const isOutsideDropZone =
+    dropZoneDistanceKm !== null && dropZoneDistanceKm > MAX_DROP_ZONE_RADIUS_KM;
+
+  const syncDestinationStop = (stop: CorridorStop | undefined) => {
+    if (!stop) return;
+    setDeliveryStopCode(stop.stopCode);
+    setDeliveryVillageOrTown(stop.name.split(' ')[0] ?? stop.district);
+    setDeliveryDistrict(stop.district);
+    setDeliveryState(stop.state);
+    if (stop.location?.coordinates?.length === 2) {
+      setDeliveryCoords(stop.location.coordinates);
+    }
+    setGeocodeMsg(null);
+  };
 
   useEffect(() => {
     if (quantity < 1 || length <= 0 || width <= 0 || height <= 0 || unitActualWeight <= 0) {
@@ -310,6 +366,14 @@ export function BookShipmentPage() {
                 <span>Refundable Token Due Now (15% of ceiling):</span>
                 <span>{formatPaise(quoteResult.tokenAmountPaise)}</span>
               </div>
+              <div className="flex justify-between text-slate-700">
+                <span>Est. Remaining Balance at Pickup (after token credit):</span>
+                <strong>
+                  {formatPaise(
+                    Math.max(0, quoteResult.computedPricePaise - quoteResult.tokenAmountPaise)
+                  )}
+                </strong>
+              </div>
             </div>
           ) : null}
 
@@ -346,13 +410,24 @@ export function BookShipmentPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    if (!selectedCorridor || !effectiveServiceDate) {
-      setFormError('Please select a corridor and an upcoming bookable service date.');
+    if (!selectedCorridor || !effectiveServiceDate || !effectivePickupStopCode || !effectiveDeliveryStopCode) {
+      setFormError(
+        'Please select a corridor, an upcoming bookable service date, and a downstream destination drop zone.'
+      );
+      return;
+    }
+    if (isOutsideDropZone && selectedDeliveryStop) {
+      setFormError(
+        `Recipient map location is ${dropZoneDistanceKm?.toFixed(1)} km from ${
+          selectedDeliveryStop.name
+        } (outside ${MAX_DROP_ZONE_RADIUS_KM} km drop-zone area). Adjust the delivery pin or select the matching destination drop zone.`
+      );
       return;
     }
 
     bookMutation.mutate({
       corridorId: selectedCorridor._id,
+      serviceType: 'STANDARD_SCHEDULED_SHARED_POOL',
       serviceDate: effectiveServiceDate,
       pickupStopCode: effectivePickupStopCode,
       deliveryStopCode: effectiveDeliveryStopCode,
@@ -386,7 +461,7 @@ export function BookShipmentPage() {
         irregularCargoNotes:
           category === 'CUSTOM' ? irregularCargoNotes || undefined : undefined,
       },
-      paymentChoice,
+      paymentChoice: 'TOKEN_PLUS_PICKUP_BALANCE',
       idempotencyKey: bookingIdempotencyKey,
     });
   };
@@ -408,10 +483,11 @@ export function BookShipmentPage() {
 
       {/* Corridor & Service Date */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-semibold text-slate-900">
-            1. Corridor, Service Date & Stops
+            1. Corridor, Service Date &amp; Route Stops
           </h2>
+          <Badge variant="info">Standard Scheduled Shared Pool (One-Way)</Badge>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           <div>
@@ -421,8 +497,18 @@ export function BookShipmentPage() {
             <select
               value={selectedCorridor?._id ?? ''}
               onChange={(e) => {
-                setCorridorId(e.target.value);
+                const nextId = e.target.value;
+                setCorridorId(nextId);
                 setServiceDate('');
+                const nextCor = corridors.find((c) => c._id === nextId);
+                const nextStops = [...(nextCor?.stops ?? [])].sort(
+                  (a, b) => a.sequenceOrder - b.sequenceOrder
+                );
+                const nextOrigin = nextStops[0];
+                const firstDownstream = nextStops.find(
+                  (s) => nextOrigin && s.sequenceOrder > nextOrigin.sequenceOrder
+                );
+                syncDestinationStop(firstDownstream);
               }}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             >
@@ -467,45 +553,42 @@ export function BookShipmentPage() {
 
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-700">
-              Origin / Pickup Zone
+              Origin / Pickup Hub (Fixed)
             </label>
-            <select
-              value={effectivePickupStopCode}
-              onChange={(e) => setPickupStopCode(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            >
-              {selectedCorridor?.stops.map((stop) => (
-                <option key={stop.stopCode} value={stop.stopCode}>
-                  {stop.sequenceOrder + 1}. {stop.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-800">
+              <span className="font-medium">
+                {originStop
+                  ? `${originStop.sequenceOrder + 1}. ${originStop.name} (${originStop.stopCode})`
+                  : 'No origin configured'}
+              </span>
+              <Lock className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Origin pickup is fixed to the selected corridor&apos;s origin hub.
+            </p>
           </div>
 
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-700">
-              Destination Drop Zone
+              Destination Drop Zone *
             </label>
             <select
               value={effectiveDeliveryStopCode}
               onChange={(e) => {
-                const code = e.target.value;
-                setDeliveryStopCode(code);
-                const stop = selectedCorridor?.stops.find((s) => s.stopCode === code);
-                if (stop) {
-                  setDeliveryVillageOrTown(stop.name.split(' ')[0]);
-                  setDeliveryDistrict(stop.district);
-                  setDeliveryCoords(stop.location.coordinates);
-                }
+                const stop = downstreamStops.find((s) => s.stopCode === e.target.value);
+                syncDestinationStop(stop);
               }}
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
             >
-              {selectedCorridor?.stops.map((stop) => (
+              {downstreamStops.map((stop) => (
                 <option key={stop.stopCode} value={stop.stopCode}>
                   {stop.sequenceOrder + 1}. {stop.name}
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Valid downstream drop zones for {selectedCorridor?.code}.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -734,10 +817,14 @@ export function BookShipmentPage() {
                   <strong className="text-slate-900">{formatPaise(quoteResult.tokenAmountPaise)}</strong>
                 </span>
                 <span>
-                  Remaining payable balance:{' '}
-                  <strong className="text-slate-900">{formatPaise(quoteResult.remainingBalancePaise)}</strong>
+                  Estimated remaining balance (collected at pickup):{' '}
+                  <strong className="text-slate-900">
+                    {formatPaise(
+                      Math.max(0, quoteResult.computedPricePaise - quoteResult.tokenAmountPaise)
+                    )}
+                  </strong>
                 </span>
-                <span>(Never exceeds guaranteed price ceiling.)</span>
+                <span>(Token is credited toward final locked price; never exceeds guaranteed ceiling.)</span>
               </div>
             </div>
           ) : null}
@@ -928,31 +1015,73 @@ export function BookShipmentPage() {
           </div>
 
           <MapPinPicker coordinates={deliveryCoords} onChange={setDeliveryCoords} />
+
+          {dropZoneDistanceKm !== null && selectedDeliveryStop ? (
+            isOutsideDropZone ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-900">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-700" />
+                  <span>
+                    Map pin is <strong>{dropZoneDistanceKm.toFixed(1)} km</strong> from{' '}
+                    <strong>{selectedDeliveryStop.name}</strong> (exceeds {MAX_DROP_ZONE_RADIUS_KM}{' '}
+                    km drop-zone service area). Move the pin into this drop zone or select a
+                    matching Destination Drop Zone above.
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => syncDestinationStop(selectedDeliveryStop)}
+                >
+                  Move Pin to {selectedDeliveryStop.name}
+                </Button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-emerald-700">
+                Pin is {dropZoneDistanceKm.toFixed(1)} km from {selectedDeliveryStop.name} hub
+                (within {MAX_DROP_ZONE_RADIUS_KM} km drop-zone delivery area).
+              </p>
+            )
+          ) : null}
         </CardContent>
       </Card>
 
-      {/* Payment Choice & Submit */}
+      {/* Standard Pooling Payment Workflow */}
       <Card>
-        <CardHeader>
-          <h2 className="text-base font-semibold text-slate-900">4. Payment Choice</h2>
+        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold text-slate-900">
+            4. Standard Pooling Payment
+          </h2>
+          <Badge variant="success">Refundable Token + Pickup Balance</Badge>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <select
-            value={paymentChoice}
-            onChange={(e) => setPaymentChoice(e.target.value as PaymentChoice)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-          >
-            <option value="TOKEN_PLUS_PICKUP_BALANCE">
-              Refundable Booking Token (15%) + Pickup Balance
-            </option>
-            <option value="FULL_PREPAID">Full Prepaid (Prototype Simulation)</option>
-          </select>
+          <div className="space-y-1 text-xs text-slate-600">
+            <p className="font-medium text-slate-800">
+              1. Booking Token (15% of ceiling):{' '}
+              <strong className="text-slate-900">
+                {quoteResult ? formatPaise(quoteResult.tokenAmountPaise) : 'Calculated from cargo'}
+              </strong>{' '}
+              due now to reserve pool capacity.
+            </p>
+            <p>
+              2. Final pooled rate locks automatically at cutoff with your token credited toward the
+              final charge. Remaining balance (
+              {quoteResult
+                ? formatPaise(
+                    Math.max(0, quoteResult.computedPricePaise - quoteResult.tokenAmountPaise)
+                  )
+                : 'final charge minus token'}{' '}
+              est.) is collected at pickup via QR verification.
+            </p>
+          </div>
 
           <Button
             type="submit"
             variant="primary"
             size="lg"
-            disabled={bookMutation.isPending}
+            disabled={bookMutation.isPending || isOutsideDropZone}
+            className="shrink-0"
           >
             {bookMutation.isPending ? 'Creating Booking...' : 'Create Shipment Booking'}
           </Button>

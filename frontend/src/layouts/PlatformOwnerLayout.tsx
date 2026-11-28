@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { CalendarClock, FileText, LogOut, ShieldCheck, Truck } from 'lucide-react';
+import { CalendarClock, ClipboardCheck, FileText, LogOut, ShieldCheck, Truck } from 'lucide-react';
 import { logoutUser } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -59,6 +59,20 @@ export function PlatformOwnerLayout() {
           >
             <CalendarClock className="h-4 w-4" />
             Corridor Schedules
+          </NavLink>
+          <NavLink
+            to="/owner/tier2-applications"
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                isActive
+                  ? 'bg-emerald-50 text-emerald-800'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              )
+            }
+          >
+            <ClipboardCheck className="h-4 w-4" />
+            Tier 2 Driver Applications
           </NavLink>
         </nav>
 

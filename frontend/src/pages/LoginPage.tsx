@@ -195,12 +195,31 @@ export function LoginPage() {
             </div>
           </div>
 
-          <p className="text-center text-sm text-slate-600">
-            New to MeeCargo?{' '}
-            <Link to="/register" className="font-medium text-emerald-700 hover:underline">
-              Create an account
-            </Link>
-          </p>
+          <div className="space-y-1.5 text-center text-sm text-slate-600">
+            <p>
+              New to MeeCargo?{' '}
+              <Link to="/register" className="font-medium text-emerald-700 hover:underline">
+                Create an account
+              </Link>
+            </p>
+            <p className="text-xs text-slate-500">
+              Drive with MeeCargo:{' '}
+              <Link to="/become-a-driver" className="font-medium text-emerald-700 hover:underline">
+                Become a Driver
+              </Link>{' '}
+              •{' '}
+              <Link to="/driver/login" className="font-medium text-slate-700 hover:underline">
+                Driver Login
+              </Link>{' '}
+              •{' '}
+              <Link
+                to="/driver/application-status"
+                className="font-medium text-slate-700 hover:underline"
+              >
+                Check Status
+              </Link>
+            </p>
+          </div>
         </CardContent>
       </Card>
     </div>
