@@ -1,155 +1,205 @@
 # MeeCargo
 
-Crowd-pooled, asset-light B2B freight prototype for semi-urban and rural corridors (**UM-02**).
-Routine pooling, dynamic pricing, cutoff locking, hybrid-fleet vehicle allocation, OR-Tools route optimization, LIFO loading plans, and delivery tracking are automated by the backend — **there is no dispatcher role, dispatcher account, or dispatcher UI**.
+**Asset-Light, Shared Freight Logistics Platform for Small Companies**
+
 
 ---
 
-## Architecture & Tech Stack
+## Problem Statement
 
-- **Frontend (`frontend/`):** React 19 + Vite 8 + TypeScript + Tailwind CSS v4 + React Router + TanStack Query + Zustand + Leaflet + Recharts + `vite-plugin-pwa` (Dexie IndexedDB offline queue)
-- **Backend API (`backend/`):** Node.js + Express 5 + TypeScript + Mongoose 9 + Socket.IO + Zod + `express-rate-limit` + Vitest
-- **Route Optimizer (`optimizer/`):** Python 3.11+ + FastAPI + Pydantic v2 + Google OR-Tools (`ortools`)
-- **Database:** MongoDB Atlas (or any MongoDB replica-set URI via `MONGODB_URL` in `backend/.env` — no Docker required)
+### Affordable Logistics Solutions for Small-Scale Companies in Semi-Urban and Rural Areas
 
----
-
-## Prerequisites
-
-- **Node.js** `>= 20` (verified on `v24.12.0`) and **npm** `>= 10`
-- **Python** `>= 3.11` and `pip` / virtual environment tooling
-- **MongoDB Atlas** cluster (or another reachable MongoDB URI) configured in `backend/.env`
+Small-scale companies operating in semi-urban and rural areas face significant challenges in transporting goods due to limited access to reliable and affordable logistics services. High transportation costs, limited availability of logistics providers, inefficient route planning, and difficulties in coordinating shipments increase operational expenses and affect delivery timelines. These challenges restrict business growth, reduce market accessibility, and make it difficult for small-scale companies to distribute their products efficiently across different locations.
 
 ---
 
-## Environment Variables
+## Platform Showcase
 
-### 1. Backend (`backend/.env`)
+### Landing Page
+![MeeCargo Landing Page](frontend/src/assets/landing_page.jpeg)
 
-Copy `backend/.env.example` to `backend/.env` and configure:
+### Shipper Dashboard & Corridor Booking
+![MeeCargo Shipper Dashboard](frontend/src/assets/shipper_dashboard.jpeg)
 
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `PORT` | No | `5000` | Express API + Socket.IO port (`3000` if matched with `VITE_API_URL`) |
-| `NODE_ENV` | No | `development` | `development`, `test`, or `production` |
-| `ORIGIN` | No | `http://localhost:5173` | Allowed frontend CORS origin |
-| `MONGODB_URL` | **Yes** | — | MongoDB Atlas connection string (`mongodb+srv://...`) |
-| `JWT_SECRET` | **Yes** | — | Access token signing secret (`>= 8` chars) |
-| `JWT_REFRESH_SECRET` | No | dev default | Refresh token signing secret |
-| `VOLUMETRIC_DIVISOR` | No | `5000` | Divisor for `(L × W × H) / divisor` |
-| `TOKEN_PERCENTAGE` | No | `15` | Refundable booking token percentage of ceiling price |
-| `PAYMENT_MODE` | No | `SIMULATED` | `SIMULATED` or `TEST_GATEWAY` |
-| `ROUTING_PROVIDER` | No | `FIXTURE` | `FIXTURE` (deterministic corridor matrix) or `OSRM` |
-| `OSRM_BASE_URL` | No | `https://router.project-osrm.org` | OSRM server base URL when `ROUTING_PROVIDER=OSRM` |
-| `OPTIMIZER_URL` | No | `http://localhost:8000` | Python FastAPI + OR-Tools base URL |
-| `OPTIMIZER_TIMEOUT_MS` | No | `5000` | HTTP timeout calling optimizer |
-| `GEOCODING_PROVIDER` | No | `FIXTURE` | `FIXTURE` or `NOMINATIM` |
-| `NOTIFICATION_PROVIDER` | No | `CONSOLE` | `CONSOLE` or `WEBHOOK` |
-| `CO2_EMISSIONS_FACTOR_KG_PER_TON_KM` | No | unset | Optional positive number enabling CO₂ impact estimates |
+### Driver Onboarding & Verification
+![MeeCargo Driver Onboarding](frontend/src/assets/driver_onboarding.jpeg)
 
-### 2. Frontend (`frontend/.env`)
-
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `VITE_API_URL` | No | empty (uses Vite proxy) | Leave empty in `vite dev` to use built-in proxy to `http://localhost:5000`, or set explicitly to your backend URL (e.g., `http://localhost:5000`) |
-
-> **Never commit `.env` files, API tokens, or production secrets.**
+### Driver Operations & Marketplace Dashboard
+![MeeCargo Driver Dashboard](frontend/src/assets/driver_dashboard.jpeg)
 
 ---
 
-## Local Setup & Run Instructions
+## Business Model
 
-### 1. Configure MongoDB Atlas URI
+### Revenue Model (3 Core Revenue Streams)
 
-Set `MONGODB_URL` in `backend/.env` to your MongoDB Atlas connection string (for example `mongodb+srv://<user>:<password>@<cluster>/meecargo?retryWrites=true&w=majority`).
+1. **Shared Outbound Freight (Rural → City)**
+   - **Dynamic Group Pricing:** Shippers book with a transparent guaranteed ceiling of **₹2.80/kg**, which drops dynamically toward **₹2.00/kg** as truck pool utilization rises.
+   - **Anchor Shipper Incentive:** The first shipper initiating a corridor pool receives an extra **5% discount (down to ₹1.90/kg)** to seed early liquidity.
+   - **Two-Stage Collection:** Shippers pay a **15–20% refundable booking token** upfront to lock capacity, with the remaining discounted balance collected via **UPI at pickup QR scan**.
 
-### 2. Seed (or Reset & Replay) Demo Data
+2. **Return-Trip Backhaul (City → Rural)**
+   - **Empty-Leg Monetization:** Fills returning corridor trucks with urban wholesale goods at **₹1.60/kg** (20–30% savings compared to standard one-way rates).
+   - **Driver & Platform Margin Expansion:** Adds **₹1,200–₹1,440** in incremental revenue per round trip on virtually the exact same fuel outlay.
 
-```bash
-cd backend
-npm install
-npm run seed          # Upsert base demo data
-npm run seed:reset    # Clear mutable demo state and replay clean scenario
+3. **Overflow & Express Commission (15%)**
+   - **Elastic Tier 2 Marketplace:** Captures a **15% platform commission** on extra on-demand marketplace vehicles, urgent direct one-way Express orders, and dynamically batched New-Route trips when contracted capacity overflows or direct dispatch is requested.
+
+### Target Users & Go-To-Market (GTM)
+
+- **Target Shippers:** Rural manufacturers, agro-traders, kirana wholesalers, hardware/textile suppliers, and urban wholesale distributors shipping return loads back to district markets.
+- **Go-To-Market Rollout:**
+  1. **Start Small in One District (Pilot Launch):** Concentrate density on one proven rural-to-city corridor (e.g., Vadodara → Anand → Nadiad → Ahmedabad `GJ-VAD-AMD-01`) with predictable daily morning/afternoon slots.
+  2. **Safe Launch Offers for Early Traders:** Protect MSMEs with guaranteed maximum ceiling rates, refundable tokens on low-utilization slots, and automated rollover options.
+  3. **Steady Drivers & Low-Cost Route Expansion:** Anchor reliable base frequency with contracted Tier 1 drivers while testing new corridors and urgent demand via Tier 2 independent drivers before locking long-term fixed commitments.
+
+---
+
+## Tech Stack
+
+| Layer | Technologies |
+| --- | --- |
+| **Frontend (`frontend/`)** | React 19, Vite 8, TypeScript, Tailwind CSS v4, React Router v7, TanStack Query v5, Zustand v5, React Hook Form + Zod, Leaflet, Recharts, Three.js (`@react-three/fiber`), `html5-qrcode`, `qrcode`, Dexie (IndexedDB offline sync), `vite-plugin-pwa`, Socket.IO Client |
+| **Backend (`backend/`)** | Node.js `>= 20`, Express 5, TypeScript, Mongoose 9, Socket.IO, Zod, JSON Web Tokens (`jsonwebtoken`), `bcryptjs`, Multer, Helmet, `express-rate-limit`, Vitest + Supertest |
+| **Route Optimizer (`optimizer/`)** | Python `>= 3.11`, FastAPI, Pydantic v2, Google OR-Tools (`ortools`), Uvicorn, Pytest |
+| **Database & Real-Time** | MongoDB Atlas (replica set enabled for multi-document ACID transactions & concurrency-safe atomic locks) + Socket.IO live corridor/driver updates |
+
+---
+
+## Environment Configuration (`.env.example`)
+
+Copy each `.env.example` template before running the services. **Never commit `.env` files or secrets.**
+
+### Backend (`backend/.env.example`)
+
+```dotenv
+PORT=5000
+NODE_ENV=development
+ORIGIN=http://localhost:5173
+MONGODB_URL=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/meecargo?retryWrites=true&w=majority
+JWT_SECRET=meecargo-dev-jwt-secret-change-me
+JWT_REFRESH_SECRET=meecargo-dev-refresh-secret-change-me
+
+# Logistics & Pricing Configuration
+VOLUMETRIC_DIVISOR=5000
+TOKEN_PERCENTAGE=15
+PAYMENT_MODE=TEST_GATEWAY
+ROUTING_PROVIDER=FIXTURE
+OSRM_BASE_URL=https://router.project-osrm.org
+OPTIMIZER_URL=http://localhost:8000
+OPTIMIZER_TIMEOUT_MS=5000
+GEOCODING_PROVIDER=FIXTURE
+NOTIFICATION_PROVIDER=CONSOLE
+
+# Singleton Platform Owner Provisioning
+PLATFORM_OWNER_EMAIL=owner@meecargo.demo
+PLATFORM_OWNER_PASSWORD=Demo@1234
+PLATFORM_OWNER_NAME=MeeCargo Platform Owner
+
+# Optional: set positive numeric kg CO2/ton-km to enable CO2 impact estimates
+CO2_EMISSIONS_FACTOR_KG_PER_TON_KM=
 ```
 
-Demo credentials (password for all accounts: **`Demo@1234`**):
-- **Shipper 1 (Patel Textiles Pvt. Ltd.):** `shipper1@meecargo.demo`
-- **Shipper 2 (Charotar Agro Mills):** `shipper2@meecargo.demo`
-- **Shipper 3 (Kheda Ceramic & Hardware):** `shipper3@meecargo.demo`
-- **Driver 1 (Tier 1 Attached Vehicle `GJ-06-MC-1001`):** `driver1@meecargo.demo`
-- **Driver 2 (Tier 2 Marketplace Vehicle `GJ-06-MK-2044`):** `driver2@meecargo.demo`
-- **Platform Owner (Singleton Account managing all Tier 1 contracts):** `owner@meecargo.demo` (or configured via `PLATFORM_OWNER_EMAIL` / `PLATFORM_OWNER_PASSWORD` in `backend/.env`)
+### Frontend (`frontend/.env.example`)
 
-What `seed:reset` prepares:
-- Fixed corridor **`GJ-VAD-AMD-01`** (`Vadodara → Anand → Nadiad → Ahmedabad`) with open `AM` and `PM` slots
-- Pre-pooled `AM` pool containing shipments `MC-DEMO-001` (Shipper 1, anchor-eligible) and `MC-DEMO-002` (Shipper 2) so booking as Shipper 3 visibly increases utilization and updates projected savings
-- Pre-assigned executable `PM` trip **`MC-DEMO-TRIP-PM1`** (`driver1`, Tier 1 vehicle) carrying `MC-DEMO-003` with a live non-sequential `/track/<token>` recipient URL printed by the seed output
-- Confirmed return backhaul request **`BH-AMD-VAD-001`** (`AMD → VAD`)
+```dotenv
+# Leave empty in dev to use Vite proxy (/api -> http://localhost:5000), or set explicit backend origin
+VITE_API_URL=http://localhost:5000
+```
 
-### 3. Start the Python OR-Tools Optimizer
+---
+
+## Project Initialization
+
+### Prerequisites
+
+- **Node.js** `>= 20` and **npm** `>= 10`
+- **Python** `>= 3.11` with `venv` / `pip`
+- **MongoDB** replica-set URI (MongoDB Atlas or local replica set configured as `MONGODB_URL` in `backend/.env`)
+
+### 1. Configure Environment & Install Dependencies
 
 ```bash
-cd optimizer
+# Backend setup
+cd backend
+cp .env.example .env
+# Update MONGODB_URL and JWT secrets in backend/.env
+npm install
+
+# Frontend setup
+cd ../frontend
+cp .env.example .env
+npm install
+
+# Python OR-Tools Optimizer setup
+cd ../optimizer
 python -m venv .venv
-# Windows PowerShell:
-.venv\Scripts\Activate.ps1
-# Linux / macOS:
-# source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Health check: `GET http://localhost:8000/health`
+Activate the Python virtual environment and install dependencies:
 
-### 4. Start the Backend API
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+```bash
+# Linux / macOS
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Seed Corridor, Fleet & Demo Accounts
+
+From `backend/`:
 
 ```bash
 cd backend
-npm run dev
+npm run seed          # Upserts corridors, slots, vehicles, and demo accounts
+npm run seed:reset    # Resets mutable state and replays a clean operational baseline
 ```
 
-Health check: `GET http://localhost:5000/api/v1/health`
+Seeded accounts (default password: `Demo@1234`):
+- **Platform Owner:** `owner@meecargo.demo`
+- **Shippers:** `shipper1@meecargo.demo`, `shipper2@meecargo.demo`, `shipper3@meecargo.demo`
+- **Tier 1 Contract Driver (`GJ-06-MC-1001`):** `driver1@meecargo.demo`
+- **Tier 2 Marketplace Driver (`GJ-06-MK-2044`):** `driver2@meecargo.demo`
 
-### 5. Start the Frontend PWA
+### 3. Start All Services
+
+Run each service in a separate terminal:
 
 ```bash
+# Terminal 1: Python Route Optimizer (port 8000)
+cd optimizer
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Terminal 2: Node.js + Express Backend API (port 5000)
+cd backend
+npm run dev
+
+# Terminal 3: React + Vite Frontend PWA (port 5173)
 cd frontend
-npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Access points:
+- **Web App:** `http://localhost:5173`
+- **Backend Health Check:** `http://localhost:5000/api/v1/health`
+- **Optimizer Health Check:** `http://localhost:8000/health`
 
 ---
 
-## Automated Verification Commands
+## Verification Commands
 
 ```bash
-# Python OR-Tools optimizer tests
+# Route optimizer tests
 cd optimizer && pytest -v
 
-# Backend typecheck, Vitest suite, and TypeScript build
+# Backend TypeScript check, Vitest suite, and build
 cd backend && npm run typecheck && npm test && npm run build
 
-# Frontend typecheck, PWA build, and ESLint
+# Frontend TypeScript check, production PWA build, and ESLint
 cd frontend && npm run build && npm run lint
 ```
-
----
-
-## Mocked / Simulated External Services
-
-- **Payments (`PAYMENT_MODE=SIMULATED`):** Booking token payments, pickup balance collection records, and refunds execute deterministic in-app simulations with audit references (`SIM-*`) — no real UPI, card, or bank transfers occur.
-- **Road Distance & Geocoding (`ROUTING_PROVIDER=FIXTURE`, `GEOCODING_PROVIDER=FIXTURE`):** Uses deterministic road distances and place coordinates for the seeded Gujarat corridor. Real `OSRM` / `NOMINATIM` HTTP providers can be enabled via env vars.
-- **Notifications (`NOTIFICATION_PROVIDER=CONSOLE`):** Logs in-app `NotificationLog` documents and console messages. SMS and WhatsApp gateways report `configured: false` in the prototype.
-- **Platform Impact Metrics:** Aggregated platform utilization and cost benchmarks display explicit calculation methodologies and illustrative demo disclosures when populated from seed/test data.
-
----
-
-## Known Limitations
-
-1. **MongoDB Transactions on Standalone Instances:** Multi-document atomicity requires a MongoDB replica set (`rs0`); standalone MongoDB instances log a warning and execute steps sequentially without transaction rollback.
-2. **Fixture Matrix Scope:** Under `ROUTING_PROVIDER=FIXTURE`, road distances exist for the demo corridor stop codes (`VAD`, `ANA`, `NAD`, `AMD`); adding custom stops requires `ROUTING_PROVIDER=OSRM` (capped at 25 matrix stops per request).
-3. **CO₂ Impact Optionality:** Estimated CO₂ impact intentionally returns `null` (with an explanatory message) unless `CO2_EMISSIONS_FACTOR_KG_PER_TON_KM` is explicitly configured in the environment.
-4. **Offline PWA Boundaries:** Drivers can view cached trips/manifests and queue status transitions offline, but final delivery verification (OTP validation / B2B sign-off / photo POD upload) requires connectivity.
-5. **External Gateways & Permits:** No live payment gateway settlement, SMS/WhatsApp delivery, or municipal city-entry permit API integration is wired in this prototype.
