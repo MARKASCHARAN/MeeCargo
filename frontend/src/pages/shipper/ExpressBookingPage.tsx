@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, CreditCard, Zap, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, CreditCard, Zap } from 'lucide-react';
 import {
   createExpressMarketplaceBooking,
   quoteExpressMarketplaceBooking,
-} from '../../api/client';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
-import { Card, CardContent, CardHeader } from '../../components/ui/Card';
-import { formatPaise } from '../../lib/format';
-import type { CargoCategory, DimensionUnit, ExpressMarketplaceQuote, WeightUnit } from '../../types/api';
+} from '@/api/client';
+import { cn } from '@/lib/cn';
+import { formatPaise } from '@/lib/format';
+import type {
+  CargoCategory,
+  DimensionUnit,
+  ExpressMarketplaceQuote,
+  WeightUnit,
+} from '@/types/api';
 
 function makeExpressKey() {
   return `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -77,7 +80,10 @@ export function ExpressBookingPage() {
       district: deliveryDistrict,
       state: 'Gujarat',
       pincode: deliveryPincode,
-      location: { type: 'Point' as const, coordinates: [deliveryLng, deliveryLat] as [number, number] },
+      location: {
+        type: 'Point' as const,
+        coordinates: [deliveryLng, deliveryLat] as [number, number],
+      },
     },
     pickupContact: { name: pickupContactName, phone: pickupContactPhone },
     recipientName,
@@ -125,134 +131,162 @@ export function ExpressBookingPage() {
 
   if (createdResult) {
     return (
-      <Card className="border-emerald-200">
-        <CardHeader>
-          <div className="flex items-center gap-2 text-emerald-700">
-            <CheckCircle2 className="h-5 w-5" />
-            <h1 className="text-lg font-bold">
-              {serviceType === 'EXPRESS_MARKETPLACE'
-                ? 'One-Way Express Booking Confirmed'
-                : 'New-Route Marketplace Demand Recorded'}
-            </h1>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm text-slate-700">
+      <div className="orbit-reveal-1 overflow-hidden rounded-[28px] border border-[#1d2542] bg-white shadow-sm">
+        <div className="flex items-center gap-2.5 bg-[#080b14] px-6 py-5 text-white">
+          <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+          <h1 className="text-lg font-bold">
+            {serviceType === 'EXPRESS_MARKETPLACE'
+              ? 'One-Way Express Booking Confirmed'
+              : 'New-Route Marketplace Demand Recorded'}
+          </h1>
+        </div>
+        <div className="space-y-4 p-6 text-sm text-[#4d5a83]">
           <p>
-            Shipment Reference: <strong className="font-mono">{createdResult.reference}</strong>
+            Shipment Reference:{' '}
+            <strong className="font-mono text-[#080b14]">{createdResult.reference}</strong>
           </p>
           {createdResult.opportunityCode ? (
             <p>
               Marketplace Opportunity:{' '}
-              <strong className="font-mono text-emerald-700">{createdResult.opportunityCode}</strong>{' '}
+              <strong className="font-mono text-[#4673eb]">{createdResult.opportunityCode}</strong>{' '}
               ({createdResult.dispatchedCount ?? 0} verified Tier 2 driver offer(s) dispatched)
             </p>
           ) : (
-            <p className="text-xs text-amber-800">
-              Batch viability is under evaluation; if minimum load fill is not reached by deadline, full rollover/refund applies automatically.
+            <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              Batch viability is under evaluation; if minimum load fill is not reached by deadline,
+              full rollover/refund applies automatically.
             </p>
           )}
           <div className="flex flex-wrap gap-3 pt-2">
-            <Link to={`/track/${createdResult.trackingToken}`}>
-              <Button variant="primary">Open Live Public Tracking</Button>
+            <Link
+              to={`/track/${createdResult.trackingToken}`}
+              className="inline-flex items-center rounded-2xl bg-[#080b14] px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-[#192038]"
+            >
+              Open Live Public Tracking
             </Link>
-            <Link to="/shipper/shipments">
-              <Button variant="outline">View Shipments</Button>
+            <Link
+              to="/shipper/shipments"
+              className="inline-flex items-center rounded-2xl border border-[#d5ddf0] bg-white px-4 py-2.5 text-xs font-semibold text-[#080b14]"
+            >
+              View Shipments
             </Link>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <Link
-            to="/shipper/book"
-            className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:underline"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Back to Standard Scheduled Shared Pool
-          </Link>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900">
-            <Zap className="h-6 w-6 text-amber-500" />
-            Express &amp; New-Route Marketplace (One-Way Direct)
-          </h1>
-          <p className="text-sm text-slate-500">
-            Direct point-to-point Tier 2 dispatch for urgent freight. One-way delivery only (no two-way return trips).
-          </p>
+      {/* Obsidian Dark Hero */}
+      <section className="orbit-reveal-1 relative overflow-hidden rounded-[28px] border border-[#1d2542] bg-[#080b14] p-6 text-white shadow-[0_24px_65px_-28px_rgba(8,11,20,0.65)] sm:p-8">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-12 -top-16 h-60 w-60 rounded-full bg-[radial-gradient(circle,rgba(70,115,235,0.28),transparent_70%)] blur-xl"
+        />
+        <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <Link
+              to="/shipper/book"
+              className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#8ea5e2] hover:text-white"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to Standard Scheduled Shared Pool
+            </Link>
+            <h1 className="flex items-center gap-2.5 text-[26px] font-[550] leading-tight tracking-[-0.04em] text-white sm:text-[34px]">
+              <Zap className="h-6 w-6 text-[#82a2ff]" />
+              <span>
+                Express &amp; new-route{' '}
+                <em
+                  className="font-orbit-serif text-[1.12em] font-normal text-[#82a2ff]"
+                  style={{ fontStyle: 'italic' }}
+                >
+                  marketplace.
+                </em>
+              </span>
+            </h1>
+            <p className="mt-1 text-xs text-[#a8b5d6] sm:text-sm">
+              Direct point-to-point Tier 2 dispatch for urgent freight. One-way delivery only.
+            </p>
+          </div>
+
+          <span className="rounded-full border border-white/15 bg-white/[0.06] px-3.5 py-1.5 text-[11px] font-semibold text-[#82a2ff]">
+            ONE-WAY TIER 2 MARKETPLACE
+          </span>
         </div>
-        <Badge variant="info">ONE-WAY TIER 2 MARKETPLACE</Badge>
-      </div>
+      </section>
 
       {errorMsg ? (
-        <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div className="flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <h2 className="text-sm font-semibold text-slate-900">1. Dispatch Mode</h2>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
+      {/* 1. Dispatch Mode */}
+      <section className="orbit-reveal-2 overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-xs">
+        <div className="border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
+          <h2 className="text-sm font-semibold text-[#080b14]">1. Dispatch Mode</h2>
+        </div>
+        <div className="flex flex-wrap gap-3 p-6">
           <button
             type="button"
             onClick={() => setServiceType('EXPRESS_MARKETPLACE')}
-            className={`rounded-lg border px-4 py-2 text-xs font-semibold ${
+            className={cn(
+              'cursor-pointer rounded-2xl border px-4 py-2.5 text-xs font-semibold transition',
               serviceType === 'EXPRESS_MARKETPLACE'
-                ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
-                : 'border-slate-200 bg-white text-slate-700'
-            }`}
+                ? 'border-[#080b14] bg-[#080b14] text-white shadow-xs'
+                : 'border-[#d5ddf0] bg-white text-[#4d5a83] hover:border-[#080b14]'
+            )}
           >
             Express Direct (One-Way Immediate Dispatch)
           </button>
           <button
             type="button"
             onClick={() => setServiceType('NEW_ROUTE_MARKETPLACE')}
-            className={`rounded-lg border px-4 py-2 text-xs font-semibold ${
+            className={cn(
+              'cursor-pointer rounded-2xl border px-4 py-2.5 text-xs font-semibold transition',
               serviceType === 'NEW_ROUTE_MARKETPLACE'
-                ? 'border-emerald-600 bg-emerald-50 text-emerald-800'
-                : 'border-slate-200 bg-white text-slate-700'
-            }`}
+                ? 'border-[#080b14] bg-[#080b14] text-white shadow-xs'
+                : 'border-[#d5ddf0] bg-white text-[#4d5a83] hover:border-[#080b14]'
+            )}
           >
             New-Route Batch (Subject to Viability Threshold)
           </button>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <h2 className="text-sm font-semibold text-slate-900">2. Origin Pickup Location</h2>
-          </CardHeader>
-          <CardContent className="space-y-3 text-xs">
+      {/* 2 & 3 Locations */}
+      <div className="orbit-reveal-2 grid gap-5 md:grid-cols-2">
+        <section className="overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-xs">
+          <div className="border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
+            <h2 className="text-sm font-semibold text-[#080b14]">2. Origin Pickup Location</h2>
+          </div>
+          <div className="space-y-3 p-6 text-xs">
             <input
               value={pickupAddressLine}
               onChange={(e) => setPickupAddressLine(e.target.value)}
               placeholder="Address Line"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              className="orbit-input-dark"
             />
             <div className="grid grid-cols-3 gap-2">
               <input
                 value={pickupTown}
                 onChange={(e) => setPickupTown(e.target.value)}
                 placeholder="City/Town"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
               <input
                 value={pickupDistrict}
                 onChange={(e) => setPickupDistrict(e.target.value)}
                 placeholder="District"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
               <input
                 value={pickupPincode}
                 onChange={(e) => setPickupPincode(e.target.value)}
                 placeholder="PIN"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark font-mono"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -260,13 +294,13 @@ export function ExpressBookingPage() {
                 value={pickupContactName}
                 onChange={(e) => setPickupContactName(e.target.value)}
                 placeholder="Pickup Contact Name"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
               <input
                 value={pickupContactPhone}
                 onChange={(e) => setPickupContactPhone(e.target.value)}
                 placeholder="Pickup Phone"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -276,7 +310,7 @@ export function ExpressBookingPage() {
                 value={pickupLat}
                 onChange={(e) => setPickupLat(Number(e.target.value))}
                 placeholder="Lat"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
               <input
                 type="number"
@@ -284,41 +318,43 @@ export function ExpressBookingPage() {
                 value={pickupLng}
                 onChange={(e) => setPickupLng(Number(e.target.value))}
                 placeholder="Lng"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        <Card>
-          <CardHeader>
-            <h2 className="text-sm font-semibold text-slate-900">3. Recipient Delivery Location</h2>
-          </CardHeader>
-          <CardContent className="space-y-3 text-xs">
+        <section className="overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-xs">
+          <div className="border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
+            <h2 className="text-sm font-semibold text-[#080b14]">
+              3. Recipient Delivery Location
+            </h2>
+          </div>
+          <div className="space-y-3 p-6 text-xs">
             <input
               value={deliveryAddressLine}
               onChange={(e) => setDeliveryAddressLine(e.target.value)}
               placeholder="Delivery Address Line"
-              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              className="orbit-input-dark"
             />
             <div className="grid grid-cols-3 gap-2">
               <input
                 value={deliveryTown}
                 onChange={(e) => setDeliveryTown(e.target.value)}
                 placeholder="City/Town"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
               <input
                 value={deliveryDistrict}
                 onChange={(e) => setDeliveryDistrict(e.target.value)}
                 placeholder="District"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
               <input
                 value={deliveryPincode}
                 onChange={(e) => setDeliveryPincode(e.target.value)}
                 placeholder="PIN"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark font-mono"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -326,13 +362,13 @@ export function ExpressBookingPage() {
                 value={recipientName}
                 onChange={(e) => setRecipientName(e.target.value)}
                 placeholder="Recipient Name"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
               <input
                 value={recipientPhone}
                 onChange={(e) => setRecipientPhone(e.target.value)}
                 placeholder="Recipient Phone"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -342,7 +378,7 @@ export function ExpressBookingPage() {
                 value={deliveryLat}
                 onChange={(e) => setDeliveryLat(Number(e.target.value))}
                 placeholder="Lat"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
               <input
                 type="number"
@@ -350,23 +386,27 @@ export function ExpressBookingPage() {
                 value={deliveryLng}
                 onChange={(e) => setDeliveryLng(Number(e.target.value))}
                 placeholder="Lng"
-                className="rounded-lg border border-slate-300 px-3 py-2"
+                className="orbit-input-dark"
               />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       </div>
 
-      <Card>
-        <CardHeader>
-          <h2 className="text-sm font-semibold text-slate-900">4. Cargo Details &amp; Capacity Quote</h2>
-        </CardHeader>
-        <CardContent className="space-y-4 text-xs">
+      {/* 4. Cargo & Quote */}
+      <section className="orbit-reveal-3 overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-xs">
+        <div className="border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
+          <h2 className="text-sm font-semibold text-[#080b14]">
+            4. Cargo Details &amp; Capacity Quote
+          </h2>
+        </div>
+
+        <div className="space-y-4 p-6 text-xs">
           <div className="grid gap-3 sm:grid-cols-6">
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value as CargoCategory)}
-              className="rounded-lg border border-slate-300 px-3 py-2 sm:col-span-2"
+              className="orbit-input-dark sm:col-span-2"
             >
               <option value="STANDARD_BOX">Standard Box</option>
               <option value="SACK_BAG">Sack / Bag</option>
@@ -380,7 +420,7 @@ export function ExpressBookingPage() {
               value={quantity}
               onChange={(e) => setQuantity(Number(e.target.value))}
               placeholder="Qty"
-              className="rounded-lg border border-slate-300 px-3 py-2"
+              className="orbit-input-dark"
             />
             <input
               type="number"
@@ -388,7 +428,7 @@ export function ExpressBookingPage() {
               value={unitActualWeight}
               onChange={(e) => setUnitActualWeight(Number(e.target.value))}
               placeholder="Unit Weight (kg)"
-              className="rounded-lg border border-slate-300 px-3 py-2"
+              className="orbit-input-dark"
             />
             <input
               type="number"
@@ -396,7 +436,7 @@ export function ExpressBookingPage() {
               value={length}
               onChange={(e) => setLength(Number(e.target.value))}
               placeholder="L (cm)"
-              className="rounded-lg border border-slate-300 px-3 py-2"
+              className="orbit-input-dark"
             />
             <input
               type="number"
@@ -404,7 +444,7 @@ export function ExpressBookingPage() {
               value={width}
               onChange={(e) => setWidth(Number(e.target.value))}
               placeholder="W (cm)"
-              className="rounded-lg border border-slate-300 px-3 py-2"
+              className="orbit-input-dark"
             />
           </div>
 
@@ -415,67 +455,72 @@ export function ExpressBookingPage() {
               value={height}
               onChange={(e) => setHeight(Number(e.target.value))}
               placeholder="Height (cm)"
-              className="rounded-lg border border-slate-300 px-3 py-2"
+              className="orbit-input-dark"
             />
             <input
               value={declaredContents}
               onChange={(e) => setDeclaredContents(e.target.value)}
               placeholder="Declared Contents"
-              className="rounded-lg border border-slate-300 px-3 py-2 sm:col-span-2"
+              className="orbit-input-dark sm:col-span-2"
             />
           </div>
 
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+          <label className="flex items-center gap-2 text-xs font-medium text-[#3b476b]">
             <input
               type="checkbox"
               checked={stackable}
               onChange={(e) => setStackable(e.target.checked)}
+              className="h-4 w-4 rounded accent-[#080b14]"
             />
             Stackable cargo
           </label>
 
           {quote ? (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1">
-              <div className="flex justify-between">
+            <div className="space-y-1.5 rounded-2xl border border-[#1d2542] bg-[#080b14] p-4 text-xs text-white">
+              <div className="flex justify-between text-[#a8b5d6]">
                 <span>Estimated Road Distance:</span>
-                <strong>{quote.estimatedDistanceKm} km ({quote.estimatedDurationMin} min)</strong>
+                <strong className="text-white">
+                  {quote.estimatedDistanceKm} km ({quote.estimatedDurationMin} min)
+                </strong>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between text-[#a8b5d6]">
                 <span>Compatible Verified Tier 2 Vehicles Available:</span>
-                <strong className={quote.compatibleVehicleCount > 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                <strong
+                  className={quote.compatibleVehicleCount > 0 ? 'text-emerald-400' : 'text-rose-400'}
+                >
                   {quote.compatibleVehicleCount}
                 </strong>
               </div>
-              <div className="flex justify-between border-t border-slate-200 pt-1 text-sm font-bold text-slate-900">
+              <div className="flex justify-between border-t border-white/10 pt-2 text-sm font-bold text-white">
                 <span>Fixed One-Way Charge:</span>
-                <span>{formatPaise(quote.customerChargePaise)}</span>
+                <span className="text-[#82a2ff]">{formatPaise(quote.customerChargePaise)}</span>
               </div>
             </div>
           ) : null}
 
-          <div className="flex flex-wrap gap-3">
-            <Button
+          <div className="flex flex-wrap gap-3 pt-1">
+            <button
               type="button"
-              variant="outline"
               disabled={quoteMutation.isPending}
               onClick={() => quoteMutation.mutate()}
+              className="cursor-pointer rounded-2xl border border-[#d5ddf0] bg-white px-5 py-2.5 text-xs font-semibold text-[#080b14] transition hover:border-[#080b14] disabled:opacity-50"
             >
               {quoteMutation.isPending ? 'Checking Capacity & Quote...' : 'Calculate Express Quote'}
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant="primary"
               disabled={bookMutation.isPending}
               onClick={() => bookMutation.mutate()}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-[#080b14] px-6 py-2.5 text-xs font-semibold text-white shadow-xs transition hover:bg-[#192038] disabled:opacity-50"
             >
-              <CreditCard className="h-4 w-4" />
+              <CreditCard className="h-4 w-4 text-[#82a2ff]" />
               {bookMutation.isPending
                 ? 'Confirming Dispatch...'
                 : 'Confirm & Dispatch One-Way Booking (Simulated)'}
-            </Button>
+            </button>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     </div>
   );
 }
