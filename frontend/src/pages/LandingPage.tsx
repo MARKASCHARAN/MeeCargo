@@ -38,7 +38,7 @@ const MEECARGO_FAQ_DATA: FaqSectionData = {
           tag: 'Pricing & Pooling',
           question: 'How does crowd-pooled corridor pricing work?',
           answer:
-            'Compatible B2B shipments share scheduled vehicles along GJ-VAD-AMD-01 (Vadodara → Anand → Nadiad → Ahmedabad). As pool utilization increases before cutoff, projected per-kg rates drop transparently.',
+            'Compatible B2B shipments share scheduled vehicles along AP-ELR-VJA-01 (Tadepalligudem → Nuzvid → Gudivada → Vijayawada) and AP-TPT-NLR-01 (Madanapalle → Pileru → Tirupati → Nellore). As pool utilization increases before cutoff, projected per-kg rates drop transparently.',
         },
         {
           id: 'faq-token',
@@ -94,7 +94,7 @@ const MEECARGO_FAQ_DATA: FaqSectionData = {
           tag: 'Return Trips',
           question: 'Can return backhauls be matched on the corridor?',
           answer:
-            'Yes. Confirmed return backhaul requests along reverse corridor legs (such as AMD → VAD) reduce empty return miles and boost vehicle utilization.',
+            'Yes. Confirmed return backhaul requests along reverse corridor legs (such as VJA → TDP or NLR → MDP) reduce empty return miles and boost vehicle utilization.',
         },
       ],
     },
@@ -160,7 +160,7 @@ export function LandingPage() {
       eyebrow: 'Automated Corridor Pooling',
       title: 'Booked, pooled, and dispatched automatically.',
       paragraphs: [
-        'Shippers reserve space on scheduled semi-urban and rural corridor slots (such as Vadodara → Anand → Nadiad → Ahmedabad) with just a 15% refundable token.',
+        'Shippers reserve space on scheduled semi-urban and rural corridor slots (such as Tadepalligudem → Nuzvid → Gudivada → Vijayawada) with just a 15% refundable token.',
         'At cutoff, MeeCargo locks shared pricing, allocates attached or marketplace vehicles, runs Google OR-Tools LIFO routing, and tracks every handoff without any dispatcher UI.',
       ],
       ctaLabel: user ? 'Open your portal' : 'Book a corridor slot',

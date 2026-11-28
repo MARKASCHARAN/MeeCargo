@@ -37,6 +37,42 @@ const FIXTURE_ROAD_LEGS: Record<string, { meters: number; seconds: number }> = {
   'AMD->ANA': { meters: 74200, seconds: 4920 },
   'AMD->NAD': { meters: 55800, seconds: 3780 },
   'AMD->AMD': { meters: 0, seconds: 0 },
+
+  // Rural Andhra Pradesh Corridor 1: Tadepalligudem (TDP) -> Nuzvid (NZW) -> Gudivada (GDV) -> Vijayawada (VJA)
+  'TDP->TDP': { meters: 0, seconds: 0 },
+  'TDP->NZW': { meters: 74200, seconds: 5280 },
+  'TDP->GDV': { meters: 72400, seconds: 5160 },
+  'TDP->VJA': { meters: 110500, seconds: 7440 },
+  'NZW->TDP': { meters: 74200, seconds: 5280 },
+  'NZW->NZW': { meters: 0, seconds: 0 },
+  'NZW->GDV': { meters: 44600, seconds: 3360 },
+  'NZW->VJA': { meters: 41800, seconds: 3120 },
+  'GDV->TDP': { meters: 72400, seconds: 5160 },
+  'GDV->NZW': { meters: 44600, seconds: 3360 },
+  'GDV->GDV': { meters: 0, seconds: 0 },
+  'GDV->VJA': { meters: 46200, seconds: 3420 },
+  'VJA->TDP': { meters: 110500, seconds: 7440 },
+  'VJA->NZW': { meters: 41800, seconds: 3120 },
+  'VJA->GDV': { meters: 46200, seconds: 3420 },
+  'VJA->VJA': { meters: 0, seconds: 0 },
+
+  // Rural Andhra Pradesh Corridor 2: Madanapalle (MDP) -> Pileru (PLR) -> Tirupati (TPT) -> Nellore (NLR)
+  'MDP->MDP': { meters: 0, seconds: 0 },
+  'MDP->PLR': { meters: 51400, seconds: 3840 },
+  'MDP->TPT': { meters: 112600, seconds: 7920 },
+  'MDP->NLR': { meters: 215400, seconds: 14100 },
+  'PLR->MDP': { meters: 51400, seconds: 3840 },
+  'PLR->PLR': { meters: 0, seconds: 0 },
+  'PLR->TPT': { meters: 63800, seconds: 4560 },
+  'PLR->NLR': { meters: 168200, seconds: 11220 },
+  'TPT->MDP': { meters: 112600, seconds: 7920 },
+  'TPT->PLR': { meters: 63800, seconds: 4560 },
+  'TPT->TPT': { meters: 0, seconds: 0 },
+  'TPT->NLR': { meters: 112400, seconds: 7560 },
+  'NLR->MDP': { meters: 215400, seconds: 14100 },
+  'NLR->PLR': { meters: 168200, seconds: 11220 },
+  'NLR->TPT': { meters: 112400, seconds: 7560 },
+  'NLR->NLR': { meters: 0, seconds: 0 },
 };
 
 function computeHaversineMeters(
