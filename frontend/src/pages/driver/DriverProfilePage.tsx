@@ -1,10 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { Lock, Truck, UserCheck } from 'lucide-react';
-import { fetchDriverProfile } from '../../api/client';
-import { Badge } from '../../components/ui/Badge';
-import { Card, CardContent, CardHeader } from '../../components/ui/Card';
-import { ErrorState, LoadingState } from '../../components/ui/StateViews';
-import { useAuthStore } from '../../stores/authStore';
+import { Lock, MapPin, ShieldCheck, Truck, UserCheck } from 'lucide-react';
+import { fetchDriverProfile } from '@/api/client';
+import { Badge } from '@/components/ui/Badge';
+import { ErrorState, LoadingState } from '@/components/ui/StateViews';
+import { useAuthStore } from '@/stores/authStore';
 
 const TIER_LABELS: Record<string, string> = {
   TIER_1: 'Tier 1 (Contract Driver)',
@@ -46,13 +45,28 @@ export function DriverProfilePage() {
   const availability = profile?.availabilityStatus ?? 'AVAILABLE';
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-6">
+      {/* Editorial Orbit Header */}
+      <section className="orbit-reveal-1 flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-[#dce5fa] bg-white/95 p-5 shadow-[0_18px_55px_-28px_rgba(24,60,115,0.22)] sm:p-7">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Driver Profile</h1>
-          <p className="text-xs text-slate-500">Read-only driver &amp; registered vehicle record</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-[#7a94df]">
+            Verified Fleet Record
+          </p>
+          <h1 className="mt-1.5 text-[28px] font-[550] leading-tight tracking-[-0.04em] text-[#080e2b] sm:text-[36px]">
+            Driver{' '}
+            <em
+              className="font-orbit-serif text-[1.12em] font-normal text-[#4a72e7]"
+              style={{ fontStyle: 'italic' }}
+            >
+              profile.
+            </em>
+          </h1>
+          <p className="mt-1 text-xs text-[#5c6b94] sm:text-sm">
+            Read-only driver identity and registered commercial vehicle specifications.
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+
+        <div className="flex flex-wrap items-center gap-2">
           {fleetTier === 'TIER_2' && profile?.tier2ApplicationStatus ? (
             <Badge
               variant={
@@ -66,116 +80,145 @@ export function DriverProfilePage() {
               Application: {profile.tier2ApplicationStatus}
             </Badge>
           ) : null}
-          <Badge variant="info">{TIER_LABELS[fleetTier] ?? fleetTier}</Badge>
+          <span className="rounded-full border border-[#cddbfa] bg-[#eef3ff] px-3.5 py-1 text-xs font-semibold text-[#3563e4]">
+            {TIER_LABELS[fleetTier] ?? fleetTier}
+          </span>
         </div>
-      </div>
+      </section>
 
-      {registeredVehicle ? (
-        <Card>
-          <CardHeader className="flex items-center justify-between py-3">
-            <div className="flex items-center gap-2">
-              <Truck className="h-4 w-4 text-emerald-700" />
-              <span className="text-sm font-semibold text-slate-900">
-                {fleetTier === 'TIER_1' ? 'Driver-Owned Vehicle' : 'Registered Vehicle'}:{' '}
-                {registeredVehicle.registrationNumber}
-              </span>
+      {/* Responsive Desktop Two-Column Split */}
+      <div className="orbit-reveal-2 grid gap-6 lg:grid-cols-12">
+        {/* Registered Vehicle Card */}
+        {registeredVehicle ? (
+          <div className="overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-[0_20px_55px_-28px_rgba(24,60,115,0.2)] lg:col-span-5">
+            <div className="flex items-center justify-between border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#4673eb] text-white">
+                  <Truck className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-[#7a87aa]">
+                    {fleetTier === 'TIER_1' ? 'Driver-Owned Vehicle' : 'Registered Vehicle'}
+                  </p>
+                  <p className="font-mono text-sm font-bold text-[#080e2b]">
+                    {registeredVehicle.registrationNumber}
+                  </p>
+                </div>
+              </div>
+              <Badge variant="success">{registeredVehicle.tier}</Badge>
             </div>
-            <Badge variant="success">{registeredVehicle.tier}</Badge>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-            <div>
-              <span className="text-slate-400">Class:</span>{' '}
-              <strong className="text-slate-800">{registeredVehicle.vehicleClass}</strong>
-            </div>
-            <div>
-              <span className="text-slate-400">Payload / Volume:</span>{' '}
-              <strong className="text-slate-800">
-                {registeredVehicle.maxWeightKg} kg / {registeredVehicle.maxVolumeCbm} m³
-              </strong>
-            </div>
-            <div className="col-span-2">
-              <span className="text-slate-400">Bed Dimensions (L×W×H cm):</span>{' '}
-              <strong className="text-slate-800">
-                {registeredVehicle.bedDimensionsCm.length} ×{' '}
-                {registeredVehicle.bedDimensionsCm.width} ×{' '}
-                {registeredVehicle.bedDimensionsCm.height}
-              </strong>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
 
-      <Card>
-        <CardHeader className="flex items-center justify-between border-b border-slate-100 py-3">
-          <div className="flex items-center gap-2">
-            <UserCheck className="h-4 w-4 text-slate-700" />
-            <h2 className="text-sm font-semibold text-slate-900">Driver Details</h2>
+            <div className="space-y-3 p-6 text-xs">
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] p-3.5">
+                <p className="text-[11px] text-[#7a87aa]">Vehicle Class</p>
+                <p className="mt-0.5 text-sm font-semibold text-[#080e2b]">
+                  {registeredVehicle.vehicleClass}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] p-3.5">
+                <p className="text-[11px] text-[#7a87aa]">Max Payload / Volume</p>
+                <p className="mt-0.5 text-sm font-semibold text-[#080e2b]">
+                  {registeredVehicle.maxWeightKg} kg / {registeredVehicle.maxVolumeCbm} m³
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] p-3.5">
+                <p className="text-[11px] text-[#7a87aa]">Bed Dimensions (L × W × H cm)</p>
+                <p className="mt-0.5 font-mono text-sm font-semibold text-[#080e2b]">
+                  {registeredVehicle.bedDimensionsCm.length} ×{' '}
+                  {registeredVehicle.bedDimensionsCm.width} ×{' '}
+                  {registeredVehicle.bedDimensionsCm.height} cm
+                </p>
+              </div>
+            </div>
           </div>
-          <Badge variant="neutral">
-            <Lock className="mr-1 inline h-3 w-3" />
-            Read-Only
-          </Badge>
-        </CardHeader>
-        <CardContent className="space-y-4 pt-4 text-xs">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
-              <p className="text-[11px] font-medium text-slate-500">Driver Name</p>
-              <p className="mt-0.5 text-sm font-semibold text-slate-900">
-                {profile?.name ?? user?.name ?? '—'}
-              </p>
-            </div>
+        ) : null}
 
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
-              <p className="text-[11px] font-medium text-slate-500">Email</p>
-              <p className="mt-0.5 text-sm font-semibold text-slate-900">
-                {user?.email ?? '—'}
-              </p>
+        {/* Driver Details Card */}
+        <div
+          className={`overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-[0_20px_55px_-28px_rgba(24,60,115,0.2)] ${
+            registeredVehicle ? 'lg:col-span-7' : 'lg:col-span-12'
+          }`}
+        >
+          <div className="flex items-center justify-between border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#eef3ff] text-[#4673eb]">
+                <UserCheck className="h-4 w-4" />
+              </div>
+              <h2 className="text-sm font-semibold text-[#080e2b]">Driver Details</h2>
             </div>
+            <span className="inline-flex items-center gap-1 rounded-full border border-[#d6e0f8] bg-white px-3 py-1 text-[11px] font-medium text-[#5c6b94]">
+              <Lock className="h-3 w-3" />
+              Read-Only
+            </span>
+          </div>
 
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
-              <p className="text-[11px] font-medium text-slate-500">Phone</p>
-              <p className="mt-0.5 text-sm font-semibold text-slate-900">
-                {profile?.phone ?? user?.phone ?? '—'}
-              </p>
-            </div>
+          <div className="space-y-4 p-6 text-xs">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] px-4 py-3">
+                <p className="text-[11px] font-medium text-[#7a87aa]">Driver Name</p>
+                <p className="mt-0.5 text-sm font-semibold text-[#080e2b]">
+                  {profile?.name ?? user?.name ?? '—'}
+                </p>
+              </div>
 
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
-              <p className="text-[11px] font-medium text-slate-500">Availability Status</p>
-              <div className="mt-1">
-                <Badge variant={AVAILABILITY_VARIANTS[availability] ?? 'neutral'}>
-                  {availability}
-                </Badge>
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] px-4 py-3">
+                <p className="text-[11px] font-medium text-[#7a87aa]">Email</p>
+                <p className="mt-0.5 text-sm font-semibold text-[#080e2b]">
+                  {user?.email ?? '—'}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] px-4 py-3">
+                <p className="text-[11px] font-medium text-[#7a87aa]">Phone</p>
+                <p className="mt-0.5 text-sm font-semibold text-[#080e2b]">
+                  {profile?.phone ?? user?.phone ?? '—'}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] px-4 py-3">
+                <p className="text-[11px] font-medium text-[#7a87aa]">Availability Status</p>
+                <div className="mt-1">
+                  <Badge variant={AVAILABILITY_VARIANTS[availability] ?? 'neutral'}>
+                    {availability}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] px-4 py-3">
+                <p className="text-[11px] font-medium text-[#7a87aa]">Fleet Tier</p>
+                <p className="mt-0.5 text-sm font-semibold text-[#080e2b]">
+                  {TIER_LABELS[fleetTier] ?? fleetTier}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] px-4 py-3">
+                <p className="text-[11px] font-medium text-[#7a87aa]">License Number</p>
+                <p className="mt-0.5 font-mono text-sm font-semibold uppercase text-[#080e2b]">
+                  {profile?.licenseNumber || '—'}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-[#e3ebfc] bg-[#f8faff] px-4 py-3 sm:col-span-2">
+                <p className="flex items-center gap-1 text-[11px] font-medium text-[#7a87aa]">
+                  <MapPin className="h-3 w-3 text-[#4673eb]" />
+                  Home Base Hub
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-[#080e2b]">
+                  {profile?.homeBase || '—'}
+                </p>
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
-              <p className="text-[11px] font-medium text-slate-500">Fleet Tier</p>
-              <p className="mt-0.5 text-sm font-semibold text-slate-900">
-                {TIER_LABELS[fleetTier] ?? fleetTier}
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2">
-              <p className="text-[11px] font-medium text-slate-500">License Number</p>
-              <p className="mt-0.5 font-mono text-sm font-semibold uppercase text-slate-900">
-                {profile?.licenseNumber || '—'}
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 sm:col-span-2">
-              <p className="text-[11px] font-medium text-slate-500">Home Base Hub</p>
-              <p className="mt-0.5 text-sm font-semibold text-slate-900">
-                {profile?.homeBase || '—'}
-              </p>
+            <div className="flex items-start gap-2 rounded-2xl border border-[#cddbfa] bg-[#eef3ff]/65 px-4 py-3 text-[11px] text-[#4d5a83]">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#4673eb]" />
+              <span>
+                Driver profile details are read-only here. Contact the Platform Owner if your
+                registration, license, or vehicle specifications need an administrative update.
+              </span>
             </div>
           </div>
-
-          <p className="rounded-lg border border-slate-200 bg-slate-100/80 px-3 py-2 text-[11px] text-slate-600">
-            Driver profile details are read-only here. Contact the Platform Owner if your registration,
-            license, or vehicle specifications need an administrative update.
-          </p>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }

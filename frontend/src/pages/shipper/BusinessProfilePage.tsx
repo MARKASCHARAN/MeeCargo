@@ -8,12 +8,10 @@ import {
   createBusinessProfile,
   fetchBusinessProfile,
   updateBusinessProfile,
-} from '../../api/client';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
-import { Card, CardContent, CardHeader } from '../../components/ui/Card';
-import { ErrorState, LoadingState } from '../../components/ui/StateViews';
-import { useAuthStore } from '../../stores/authStore';
+} from '@/api/client';
+import { Badge } from '@/components/ui/Badge';
+import { ErrorState, LoadingState } from '@/components/ui/StateViews';
+import { useAuthStore } from '@/stores/authStore';
 
 const businessSchema = z.object({
   businessName: z.string().trim().min(2, 'Business name is required'),
@@ -35,7 +33,10 @@ const businessSchema = z.object({
         .string()
         .trim()
         .toUpperCase()
-        .regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/, 'Invalid GSTIN format'),
+        .regex(
+          /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/,
+          'Invalid GSTIN format'
+        ),
     ])
     .optional(),
   addressLine: z.string().trim().min(3, 'Street / estate address is required'),
@@ -181,45 +182,66 @@ export function BusinessProfilePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">B2B Business Profile</h1>
-          <p className="text-sm text-slate-500">
-            Required before booking shipments. Data is isolated to your business.
-          </p>
+      {/* Obsidian Dark Hero */}
+      <section className="orbit-reveal-1 relative overflow-hidden rounded-[28px] border border-[#1d2542] bg-[#080b14] p-6 text-white shadow-[0_24px_65px_-28px_rgba(8,11,20,0.65)] sm:p-8">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-12 -top-16 h-60 w-60 rounded-full bg-[radial-gradient(circle,rgba(70,115,235,0.28),transparent_70%)] blur-xl"
+        />
+        <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-[#8ea5e2]">
+              Isolated Business Entity
+            </p>
+            <h1 className="mt-1.5 text-[28px] font-[550] leading-tight tracking-[-0.04em] text-white sm:text-[36px]">
+              B2B business{' '}
+              <em
+                className="font-orbit-serif text-[1.12em] font-normal text-[#82a2ff]"
+                style={{ fontStyle: 'italic' }}
+              >
+                profile.
+              </em>
+            </h1>
+            <p className="mt-1 text-xs text-[#a8b5d6] sm:text-sm">
+              Required before booking shipments. Data is isolated to your verified business.
+            </p>
+          </div>
+          <Badge variant={existing ? 'success' : 'warning'}>
+            <Building2 className="h-3.5 w-3.5" />
+            {existing ? 'Profile Active' : 'Setup Required'}
+          </Badge>
         </div>
-        <Badge variant={existing ? 'success' : 'warning'}>
-          <Building2 className="h-3.5 w-3.5" />
-          {existing ? 'Profile Active' : 'Setup Required'}
-        </Badge>
-      </div>
+      </section>
 
       {savedNotice ? (
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+        <div className="flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-800">
           <CheckCircle2 className="h-4 w-4" />
           Business profile saved successfully.
         </div>
       ) : null}
 
       {mutation.isError ? (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700">
           {mutation.error.message}
         </div>
       ) : null}
 
       <form onSubmit={handleSubmit((vals) => mutation.mutate(vals))} className="space-y-6">
-        <Card>
-          <CardHeader>
-            <h2 className="text-base font-semibold text-slate-900">Company & Contact</h2>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
+        <section className="orbit-reveal-2 overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-xs">
+          <div className="border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
+            <h2 className="text-sm font-semibold text-[#080b14] sm:text-base">
+              Company &amp; Contact
+            </h2>
+          </div>
+
+          <div className="grid gap-4 p-6 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                 Business Name *
               </label>
               <input
                 {...register('businessName')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="orbit-input-dark"
                 placeholder="Patel Textiles Pvt. Ltd."
               />
               {errors.businessName ? (
@@ -228,13 +250,10 @@ export function BusinessProfilePage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                 Business Type
               </label>
-              <select
-                {...register('businessType')}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              >
+              <select {...register('businessType')} className="orbit-input-dark">
                 <option value="MANUFACTURER">Manufacturer</option>
                 <option value="WHOLESALER">Wholesaler</option>
                 <option value="TEXTILE_MILL">Textile Mill</option>
@@ -245,173 +264,140 @@ export function BusinessProfilePage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                 Contact Person *
               </label>
-              <input
-                {...register('contactName')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <input {...register('contactName')} className="orbit-input-dark" />
               {errors.contactName ? (
                 <p className="mt-1 text-xs text-rose-600">{errors.contactName.message}</p>
               ) : null}
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                 Contact Phone *
               </label>
-              <input
-                {...register('contactPhone')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <input {...register('contactPhone')} className="orbit-input-dark" />
               {errors.contactPhone ? (
                 <p className="mt-1 text-xs text-rose-600">{errors.contactPhone.message}</p>
               ) : null}
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                 Contact Email *
               </label>
-              <input
-                {...register('contactEmail')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <input {...register('contactEmail')} className="orbit-input-dark" />
               {errors.contactEmail ? (
                 <p className="mt-1 text-xs text-rose-600">{errors.contactEmail.message}</p>
               ) : null}
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                 GSTIN (optional for prototype)
               </label>
               <input
                 {...register('gstin')}
                 placeholder="24AAACP1234A1Z5"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase"
+                className="orbit-input-dark font-mono uppercase"
               />
               {errors.gstin ? (
                 <p className="mt-1 text-xs text-rose-600">{errors.gstin.message}</p>
               ) : null}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        <Card>
-          <CardHeader>
-            <h2 className="text-base font-semibold text-slate-900">
-              Primary Pickup Address & Coordinates
+        <section className="orbit-reveal-2 overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-xs">
+          <div className="border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
+            <h2 className="text-sm font-semibold text-[#080b14] sm:text-base">
+              Primary Pickup Address &amp; Coordinates
             </h2>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
+          </div>
+
+          <div className="grid gap-4 p-6 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                 Address Line / Plot / Industrial Estate *
               </label>
-              <input
-                {...register('addressLine')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <input {...register('addressLine')} className="orbit-input-dark" />
               {errors.addressLine ? (
                 <p className="mt-1 text-xs text-rose-600">{errors.addressLine.message}</p>
               ) : null}
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                 Village / Town *
               </label>
-              <input
-                {...register('villageOrTown')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <input {...register('villageOrTown')} className="orbit-input-dark" />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                District *
-              </label>
-              <input
-                {...register('district')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">District *</label>
+              <input {...register('district')} className="orbit-input-dark" />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                State *
-              </label>
-              <input
-                {...register('state')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">State *</label>
+              <input {...register('state')} className="orbit-input-dark" />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                PIN Code *
-              </label>
-              <input
-                {...register('pincode')}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">PIN Code *</label>
+              <input {...register('pincode')} className="orbit-input-dark font-mono" />
               {errors.pincode ? (
                 <p className="mt-1 text-xs text-rose-600">{errors.pincode.message}</p>
               ) : null}
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                Landmark
-              </label>
+              <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">Landmark</label>
               <input
                 {...register('landmark')}
                 placeholder="Near GIDC Main Gate"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="orbit-input-dark"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">
+                <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                   Longitude *
                 </label>
                 <input
                   type="number"
                   step="any"
                   {...register('longitude')}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="orbit-input-dark"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">
+                <label className="mb-1.5 block text-xs font-medium text-[#3b476b]">
                   Latitude *
                 </label>
                 <input
                   type="number"
                   step="any"
                   {...register('latitude')}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="orbit-input-dark"
                 />
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        <Card>
-          <CardHeader className="flex items-center justify-between">
+        <section className="orbit-reveal-3 overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
             <div>
-              <h2 className="text-base font-semibold text-slate-900">Service Locations</h2>
-              <p className="text-xs text-slate-500">
-                Frequent towns/hubs where this business ships.
-              </p>
+              <h2 className="text-sm font-semibold text-[#080b14] sm:text-base">
+                Service Locations
+              </h2>
+              <p className="text-xs text-[#5c6b94]">Frequent towns/hubs where this business ships.</p>
             </div>
-            <Button
+            <button
               type="button"
-              size="sm"
-              variant="outline"
               onClick={() =>
                 append({
                   label: '',
@@ -421,64 +407,68 @@ export function BusinessProfilePage() {
                   pincode: '',
                 })
               }
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-2xl border border-[#d5ddf0] bg-white px-3.5 py-2 text-xs font-semibold text-[#080b14] transition hover:border-[#080b14]"
             >
-              <Plus className="h-4 w-4" />
+              <Plus className="h-4 w-4 text-[#4673eb]" />
               Add location
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
+            </button>
+          </div>
+
+          <div className="space-y-3 p-6">
             {fields.length === 0 ? (
-              <p className="text-sm text-slate-500">No extra service locations added yet.</p>
+              <p className="text-xs text-[#5c6b94]">No extra service locations added yet.</p>
             ) : (
               fields.map((field, index) => (
                 <div
                   key={field.id}
-                  className="grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-5"
+                  className="grid gap-2.5 rounded-2xl border border-[#dce5fa] bg-[#f8faff] p-3.5 sm:grid-cols-5"
                 >
                   <input
                     {...register(`serviceLocations.${index}.label`)}
                     placeholder="Label (e.g. Anand Hub)"
-                    className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+                    className="orbit-input-dark py-2"
                   />
                   <input
                     {...register(`serviceLocations.${index}.villageOrTown`)}
                     placeholder="Town"
-                    className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+                    className="orbit-input-dark py-2"
                   />
                   <input
                     {...register(`serviceLocations.${index}.district`)}
                     placeholder="District"
-                    className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+                    className="orbit-input-dark py-2"
                   />
                   <input
                     {...register(`serviceLocations.${index}.pincode`)}
                     placeholder="PIN (optional)"
-                    className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+                    className="orbit-input-dark py-2 font-mono"
                   />
-                  <Button
+                  <button
                     type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="text-rose-600"
                     onClick={() => remove(index)}
+                    className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-medium text-rose-600 transition hover:bg-rose-50"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-3.5 w-3.5" />
                     Remove
-                  </Button>
+                  </button>
                 </div>
               ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
         <div className="flex justify-end">
-          <Button type="submit" variant="primary" size="lg" disabled={mutation.isPending}>
+          <button
+            type="submit"
+            disabled={mutation.isPending}
+            className="cursor-pointer rounded-2xl bg-[#080b14] px-7 py-3.5 text-sm font-semibold text-white shadow-[0_14px_34px_-14px_rgba(8,11,20,0.55)] transition hover:-translate-y-0.5 hover:bg-[#192038] disabled:opacity-50"
+          >
             {mutation.isPending
               ? 'Saving...'
               : existing
                 ? 'Update Business Profile'
                 : 'Save & Activate Business Profile'}
-          </Button>
+          </button>
         </div>
       </form>
     </div>

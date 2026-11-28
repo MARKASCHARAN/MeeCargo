@@ -12,13 +12,12 @@ import {
   PackagePlus,
   Radio,
 } from 'lucide-react';
-import { fetchCorridors, fetchPools } from '../../api/client';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
-import { Card, CardContent, CardHeader } from '../../components/ui/Card';
-import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateViews';
-import { formatPaise } from '../../lib/format';
-import type { CorridorServiceDateSummary, PoolLiveMetrics } from '../../types/api';
+import { fetchCorridors, fetchPools } from '@/api/client';
+import { Badge } from '@/components/ui/Badge';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
+import { cn } from '@/lib/cn';
+import { formatPaise } from '@/lib/format';
+import type { CorridorServiceDateSummary, PoolLiveMetrics } from '@/types/api';
 
 function formatServiceDate(iso?: string): string {
   if (!iso) return '—';
@@ -109,90 +108,110 @@ export function CorridorsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            Scheduled Corridors &amp; Live Pools
-          </h1>
-          <p className="text-sm text-slate-500">
-            Browse active corridors and upcoming service dates. MeeCargo automatically matches your
-            shipment to the right operational pool and never exposes driver slot selection.
-          </p>
+      {/* Obsidian Hero Header */}
+      <section className="orbit-reveal-1 relative overflow-hidden rounded-[28px] border border-[#1d2542] bg-[#080b14] p-6 text-white shadow-[0_24px_65px_-28px_rgba(8,11,20,0.65)] sm:p-8">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-12 -top-16 h-60 w-60 rounded-full bg-[radial-gradient(circle,rgba(70,115,235,0.28),transparent_70%)] blur-xl"
+        />
+        <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-[#8ea5e2]">
+              Real-Time Corridor Pooling
+            </p>
+            <h1 className="mt-1.5 text-[28px] font-[550] leading-tight tracking-[-0.04em] text-white sm:text-[36px]">
+              Scheduled corridors &amp;{' '}
+              <em
+                className="font-orbit-serif text-[1.12em] font-normal text-[#82a2ff]"
+                style={{ fontStyle: 'italic' }}
+              >
+                live pools.
+              </em>
+            </h1>
+            <p className="mt-1.5 max-w-2xl text-xs text-[#a8b5d6] sm:text-sm">
+              Browse active corridors and upcoming service dates. MeeCargo matches your shipment
+              automatically without exposing internal driver slot selection.
+            </p>
+          </div>
+
+          <span
+            className={cn(
+              'inline-flex shrink-0 items-center gap-1.5 self-start rounded-full border px-3.5 py-1.5 text-xs font-semibold sm:self-center',
+              socketConnected
+                ? 'border-emerald-400/35 bg-emerald-500/15 text-emerald-300'
+                : 'border-white/15 bg-white/[0.06] text-[#c0cce8]'
+            )}
+          >
+            <Radio className="h-3.5 w-3.5" />
+            {socketConnected ? 'Live updates connected' : 'Live updates'}
+          </span>
+        </div>
+      </section>
+
+      {/* Filters & Chargeable Weight Estimator */}
+      <div className="orbit-reveal-2 flex flex-col gap-3 rounded-[24px] border border-[#dce5fa] bg-white/95 p-4 shadow-xs sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold text-[#4d5a83]">Service Dates:</span>
+          <button
+            type="button"
+            onClick={() => setDateFilter('UPCOMING_BOOKABLE')}
+            className={cn(
+              'cursor-pointer rounded-full border px-4 py-1.5 text-xs font-semibold transition',
+              dateFilter === 'UPCOMING_BOOKABLE'
+                ? 'border-[#080b14] bg-[#080b14] text-white'
+                : 'border-[#d5ddf0] bg-white text-[#4d5a83] hover:border-[#080b14] hover:text-[#080b14]'
+            )}
+          >
+            Upcoming Bookable Dates
+          </button>
+          <button
+            type="button"
+            onClick={() => setDateFilter('ALL')}
+            className={cn(
+              'cursor-pointer rounded-full border px-4 py-1.5 text-xs font-semibold transition',
+              dateFilter === 'ALL'
+                ? 'border-[#080b14] bg-[#080b14] text-white'
+                : 'border-[#d5ddf0] bg-white text-[#4d5a83] hover:border-[#080b14] hover:text-[#080b14]'
+            )}
+          >
+            All Dates
+          </button>
         </div>
 
-        <Badge variant={socketConnected ? 'success' : 'neutral'}>
-          <Radio className="h-3.5 w-3.5" />
-          Live updates
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <Calculator className="h-3.5 w-3.5 text-[#4673eb]" />
+          <label htmlFor="sample-kg" className="font-medium text-[#4d5a83]">
+            Estimate Charge (Chargeable kg):
+          </label>
+          <input
+            id="sample-kg"
+            type="number"
+            min="1"
+            step="1"
+            value={sampleChargeableKg}
+            onChange={(e) => setSampleChargeableKg(e.target.value)}
+            placeholder="e.g. 250"
+            className="orbit-input-dark w-28 py-1.5"
+          />
+          <span className="text-[11px] text-[#7a87aa]">max(actual, volumetric)</span>
+        </div>
       </div>
 
-      {/* Filters & optional Chargeable Weight Estimator */}
-      <Card>
-        <CardContent className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-slate-600">Service Dates:</span>
-            <button
-              type="button"
-              onClick={() => setDateFilter('UPCOMING_BOOKABLE')}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                dateFilter === 'UPCOMING_BOOKABLE'
-                  ? 'border-emerald-600 bg-emerald-600 text-white'
-                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              Upcoming Bookable Dates
-            </button>
-            <button
-              type="button"
-              onClick={() => setDateFilter('ALL')}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-                dateFilter === 'ALL'
-                  ? 'border-emerald-600 bg-emerald-600 text-white'
-                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              All Dates
-            </button>
+      {/* Live Pools Section */}
+      <section className="orbit-reveal-2 overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-[0_20px_55px_-28px_rgba(8,11,20,0.16)]">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#080b14] text-white">
+              <Activity className="h-4 w-4 text-[#82a2ff]" />
+            </div>
+            <h2 className="text-base font-semibold text-[#080b14]">Active Freight Pools</h2>
           </div>
+          <span className="text-xs text-[#5c6b94]">Cutoff locks automatically on schedule</span>
+        </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <Calculator className="h-3.5 w-3.5 text-slate-500" />
-            <label htmlFor="sample-kg" className="text-slate-600">
-              Estimate Charge (Chargeable kg):
-            </label>
-            <input
-              id="sample-kg"
-              type="number"
-              min="1"
-              step="1"
-              value={sampleChargeableKg}
-              onChange={(e) => setSampleChargeableKg(e.target.value)}
-              placeholder="e.g. 250"
-              className="w-24 rounded-lg border border-slate-300 px-2.5 py-1 text-xs"
-            />
-            <span className="text-[11px] text-slate-500">
-              Uses max(actual weight, volumetric weight)
-            </span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Live Pools Section (Service-date view without driver slot labels or internal IDs) */}
-      <Card>
-        <CardHeader className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Activity className="h-4 w-4 text-emerald-700" />
-            <h2 className="text-base font-semibold text-slate-900">
-              Active Freight Pools
-            </h2>
-          </div>
-          <span className="text-xs text-slate-500">
-            Cutoff locks automatically on backend schedule
-          </span>
-        </CardHeader>
-        <CardContent>
+        <div className="p-6">
           {pools.length === 0 ? (
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-[#5c6b94]">
               No active pools yet. Pools open automatically when shipments book onto a service date.
             </p>
           ) : (
@@ -217,23 +236,23 @@ export function CorridorsPage() {
                 return (
                   <div
                     key={pool._id}
-                    className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4"
+                    className="space-y-3.5 rounded-[22px] border border-[#dce5fa] bg-[#f8faff] p-5 transition hover:border-[#080b14]/35 hover:bg-white"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-emerald-700">
+                          <span className="rounded-lg bg-[#080b14] px-2.5 py-0.5 font-mono text-xs font-bold text-white">
                             {pool.corridorId?.code ?? 'Corridor'}
                           </span>
-                          <span className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                            <Calendar className="h-3 w-3 text-emerald-700" />
-                            Service Date: {serviceDate}
+                          <span className="inline-flex items-center gap-1 rounded-full border border-[#dce5fa] bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[#080b14]">
+                            <Calendar className="h-3 w-3 text-[#4673eb]" />
+                            {serviceDate}
                           </span>
                         </div>
-                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                        <p className="mt-1.5 text-sm font-semibold text-[#080b14]">
                           {pool.corridorId?.name ?? 'Scheduled Corridor'}
                         </p>
-                        <p className="mt-0.5 text-xs text-slate-500">
+                        <p className="mt-0.5 text-xs text-[#5c6b94]">
                           {metrics.shipmentCount} pooled shipment(s)
                           {metrics.appliedTierLabel &&
                           !metrics.appliedTierLabel.startsWith('Base Pool')
@@ -256,63 +275,63 @@ export function CorridorsPage() {
 
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div>
-                        <div className="flex justify-between font-medium text-slate-700">
+                        <div className="flex justify-between font-medium text-[#4d5a83]">
                           <span>Weight Utilization</span>
                           <span>{metrics.weightUtilizationPct}%</span>
                         </div>
-                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
+                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-[#e3ebfc]">
                           <div
-                            className="h-full bg-emerald-600 transition-all"
+                            className="h-full rounded-full bg-[#080b14] transition-all duration-500"
                             style={{ width: `${metrics.weightUtilizationPct}%` }}
                           />
                         </div>
-                        <p className="mt-0.5 text-[11px] text-slate-500">
-                          {remainingKg.toFixed(0)} kg remaining ({metrics.reservedWeightKg} /{' '}
+                        <p className="mt-0.5 text-[11px] text-[#7a87aa]">
+                          {remainingKg.toFixed(0)} kg left ({metrics.reservedWeightKg} /{' '}
                           {metrics.capacityWeightKg} kg)
                         </p>
                       </div>
 
                       <div>
-                        <div className="flex justify-between font-medium text-slate-700">
+                        <div className="flex justify-between font-medium text-[#4d5a83]">
                           <span>Volume Utilization</span>
                           <span>{metrics.volumeUtilizationPct}%</span>
                         </div>
-                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200">
+                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-[#e3ebfc]">
                           <div
-                            className="h-full bg-sky-600 transition-all"
+                            className="h-full rounded-full bg-[#4673eb] transition-all duration-500"
                             style={{ width: `${metrics.volumeUtilizationPct}%` }}
                           />
                         </div>
-                        <p className="mt-0.5 text-[11px] text-slate-500">
-                          {remainingCbm.toFixed(2)} m³ remaining ({metrics.reservedVolumeCbm} /{' '}
+                        <p className="mt-0.5 text-[11px] text-[#7a87aa]">
+                          {remainingCbm.toFixed(2)} m³ left ({metrics.reservedVolumeCbm} /{' '}
                           {metrics.capacityVolumeCbm} m³)
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#e3ebfc] pt-3">
                       <div>
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-[11px] text-[#5c6b94]">
                           {metrics.isEstimateFinal
                             ? 'Final Locked Rate / Chargeable kg'
                             : 'Projected Rate / Chargeable kg'}
                         </p>
-                        <p className="text-base font-bold text-slate-900">
+                        <p className="text-base font-bold text-[#080b14]">
                           {formatPaise(metrics.projectedRatePaisePerKg)} / kg
                         </p>
                         {ceilingPaise ? (
-                          <p className="text-[11px] text-slate-500">
+                          <p className="text-[11px] text-[#7a87aa]">
                             Guaranteed Price Ceiling: {formatPaise(ceilingPaise)} / kg
                           </p>
                         ) : null}
                       </div>
 
                       {hasSampleWeight ? (
-                        <div className="text-right text-xs">
-                          <span className="text-slate-500">
-                            Est. freight ({parsedChargeableKg} kg):
+                        <div className="rounded-xl bg-[#080b14] px-3 py-1.5 text-right text-xs text-white">
+                          <span className="block text-[10px] text-[#9eb0db]">
+                            Est. ({parsedChargeableKg} kg)
                           </span>
-                          <p className="font-bold text-emerald-700">
+                          <p className="font-bold text-[#82a2ff]">
                             {formatPaise(
                               Math.round(parsedChargeableKg * metrics.projectedRatePaisePerKg)
                             )}
@@ -322,7 +341,7 @@ export function CorridorsPage() {
                     </div>
 
                     {pool.viabilityStatus === 'FAILED' && pool.viabilityReason ? (
-                      <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                      <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
                         {pool.viabilityReason}
                       </div>
                     ) : null}
@@ -331,188 +350,193 @@ export function CorridorsPage() {
               })}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      {/* Corridors & Service Dates (NO slot-level buttons or driver pickup slot selectors) */}
-      {corridors.map((corridor) => {
-        const allDates = corridor.serviceDates ?? [];
-        const visibleDates = allDates.filter((d) =>
-          dateFilter === 'ALL' ? true : d.bookable
-        );
+      {/* Corridors & Service Dates */}
+      <div className="orbit-reveal-3 space-y-6">
+        {corridors.map((corridor) => {
+          const allDates = corridor.serviceDates ?? [];
+          const visibleDates = allDates.filter((d) => (dateFilter === 'ALL' ? true : d.bookable));
 
-        return (
-          <Card key={corridor._id}>
-            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-xs font-semibold text-emerald-700">
-                    {corridor.code}
-                  </span>
-                  <Badge variant="info">
-                    Guaranteed Ceiling: {formatPaise(corridor.guaranteedCeilingPaisePerKg)} /
-                    Chargeable kg
-                  </Badge>
-                </div>
-                <h2 className="mt-1 text-lg font-semibold text-slate-900">
-                  {corridor.name}
-                </h2>
-                {corridor.description ? (
-                  <p className="text-xs text-slate-500">{corridor.description}</p>
-                ) : null}
-              </div>
-
-              <div className="text-xs text-slate-500">
-                Operating Days:{' '}
-                <strong className="text-slate-700">{corridor.operatingDays.join(', ')}</strong>
-              </div>
-            </CardHeader>
-
-            <CardContent className="space-y-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <MapPin className="h-4 w-4 text-emerald-600" />
-                {corridor.stops.map((stop, idx) => (
-                  <div key={stop.stopCode} className="flex items-center gap-2">
-                    <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800">
-                      {stop.stopCode}: {stop.name}
+          return (
+            <section
+              key={corridor._id}
+              className="overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-[0_20px_55px_-28px_rgba(8,11,20,0.16)]"
+            >
+              <div className="flex flex-col gap-2 border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-lg bg-[#080b14] px-2.5 py-0.5 font-mono text-xs font-semibold text-white">
+                      {corridor.code}
                     </span>
-                    {idx < corridor.stops.length - 1 ? (
-                      <span className="text-slate-400">→</span>
-                    ) : null}
+                    <Badge variant="info">
+                      Guaranteed Ceiling: {formatPaise(corridor.guaranteedCeilingPaisePerKg)} / kg
+                    </Badge>
                   </div>
-                ))}
+                  <h2 className="mt-1.5 text-lg font-semibold text-[#080b14]">{corridor.name}</h2>
+                  {corridor.description ? (
+                    <p className="text-xs text-[#5c6b94]">{corridor.description}</p>
+                  ) : null}
+                </div>
+
+                <div className="text-xs text-[#5c6b94]">
+                  Operating Days:{' '}
+                  <strong className="text-[#080b14]">{corridor.operatingDays.join(', ')}</strong>
+                </div>
               </div>
 
-              {visibleDates.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-6 text-center text-xs text-slate-500">
-                  No upcoming bookable service dates on this corridor. Switch to{' '}
-                  <button
-                    type="button"
-                    onClick={() => setDateFilter('ALL')}
-                    className="font-semibold text-emerald-700 underline"
-                  >
-                    All Dates
-                  </button>{' '}
-                  to inspect locked or closed dates.
-                </div>
-              ) : (
-                <div className="grid gap-3 md:grid-cols-2">
-                  {visibleDates.map((sd) => (
-                    <div
-                      key={sd.serviceDate}
-                      className="flex flex-col justify-between rounded-xl border border-slate-200 p-4"
-                    >
-                      <div className="space-y-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800">
-                              <Calendar className="h-3.5 w-3.5" />
-                              Service Date: {formatServiceDate(sd.departureDate ?? sd.serviceDate)}
-                            </span>
-                            <p className="mt-1.5 text-[11px] font-medium text-slate-600">
-                              {sd.pooledShipmentCount} pooled shipment(s) on this date
-                            </p>
-                          </div>
-                          <Badge variant={statusBadgeVariant(sd.status)}>{sd.status}</Badge>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                          <CalendarClock className="h-3.5 w-3.5 text-slate-400" />
-                          <span>
-                            Automatic Cutoff:{' '}
-                            <strong>{new Date(sd.cutoffAt).toLocaleString('en-IN')}</strong>
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3 pt-1 text-xs">
-                          <div>
-                            <div className="flex justify-between text-slate-600">
-                              <span>Weight Utilized</span>
-                              <span>{sd.weightUtilizationPct}%</span>
-                            </div>
-                            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                              <div
-                                className="h-full bg-emerald-600"
-                                style={{ width: `${sd.weightUtilizationPct}%` }}
-                              />
-                            </div>
-                            <p className="mt-0.5 text-[11px] text-slate-500">
-                              {sd.availableWeightKg.toFixed(0)} / {sd.capacityWeightKg} kg free
-                            </p>
-                          </div>
-
-                          <div>
-                            <div className="flex justify-between text-slate-600">
-                              <span>Volume Utilized</span>
-                              <span>{sd.volumeUtilizationPct}%</span>
-                            </div>
-                            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                              <div
-                                className="h-full bg-sky-600"
-                                style={{ width: `${sd.volumeUtilizationPct}%` }}
-                              />
-                            </div>
-                            <p className="mt-0.5 text-[11px] text-slate-500">
-                              {sd.availableVolumeCbm.toFixed(2)} / {sd.capacityVolumeCbm} m³ free
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-600">Projected Rate / Chargeable kg:</span>
-                            <strong className="text-slate-900">
-                              {formatPaise(sd.projectedRatePaisePerKg)} / kg
-                            </strong>
-                          </div>
-                          <div className="mt-0.5 flex items-center justify-between text-[11px] text-slate-500">
-                            <span>Configured Price Ceiling:</span>
-                            <span>{formatPaise(corridor.guaranteedCeilingPaisePerKg)} / kg</span>
-                          </div>
-                          {hasSampleWeight ? (
-                            <div className="mt-1 flex items-center justify-between border-t border-slate-200 pt-1 text-[11px]">
-                              <span className="text-slate-600">
-                                Est. Freight ({parsedChargeableKg} kg):
-                              </span>
-                              <strong className="text-emerald-700">
-                                {formatPaise(
-                                  Math.round(parsedChargeableKg * sd.projectedRatePaisePerKg)
-                                )}
-                              </strong>
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="mt-4">
-                        {!sd.bookable ? (
-                          <Button variant="outline" size="sm" className="w-full" disabled>
-                            <Lock className="h-3.5 w-3.5" />
-                            {sd.status === 'LOCKED'
-                              ? 'Service Locked — Booking Closed'
-                              : sd.status === 'FULL'
-                                ? 'Capacity Full — Choose Another Date'
-                                : 'Booking Window Closed'}
-                          </Button>
-                        ) : (
-                          <Link
-                            to={`/shipper/book?corridorId=${corridor._id}&serviceDate=${sd.serviceDate}`}
-                          >
-                            <Button variant="primary" size="sm" className="w-full">
-                              <PackagePlus className="h-4 w-4" />
-                              Book Shipment
-                            </Button>
-                          </Link>
-                        )}
-                      </div>
+              <div className="space-y-5 p-6">
+                <div className="flex flex-wrap items-center gap-2">
+                  <MapPin className="h-4 w-4 text-[#4673eb]" />
+                  {corridor.stops.map((stop, idx) => (
+                    <div key={stop.stopCode} className="flex items-center gap-2">
+                      <span className="rounded-full border border-[#dce5fa] bg-[#f8faff] px-3 py-1 text-xs font-medium text-[#080b14]">
+                        {stop.stopCode}: {stop.name}
+                      </span>
+                      {idx < corridor.stops.length - 1 ? (
+                        <span className="text-[#7a87aa]">→</span>
+                      ) : null}
                     </div>
                   ))}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        );
-      })}
+
+                {visibleDates.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[#cddbfa] bg-[#f8faff] px-4 py-7 text-center text-xs text-[#5c6b94]">
+                    No upcoming bookable service dates on this corridor. Switch to{' '}
+                    <button
+                      type="button"
+                      onClick={() => setDateFilter('ALL')}
+                      className="cursor-pointer font-semibold text-[#080b14] underline"
+                    >
+                      All Dates
+                    </button>{' '}
+                    to inspect locked or closed dates.
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {visibleDates.map((sd) => (
+                      <div
+                        key={sd.serviceDate}
+                        className="flex flex-col justify-between rounded-[22px] border border-[#dce5fa] bg-white p-5 transition hover:border-[#080b14]/35"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#080b14] px-3 py-1 text-xs font-semibold text-white">
+                                <Calendar className="h-3.5 w-3.5 text-[#82a2ff]" />
+                                {formatServiceDate(sd.departureDate ?? sd.serviceDate)}
+                              </span>
+                              <p className="mt-1.5 text-[11px] font-medium text-[#5c6b94]">
+                                {sd.pooledShipmentCount} pooled shipment(s) on this date
+                              </p>
+                            </div>
+                            <Badge variant={statusBadgeVariant(sd.status)}>{sd.status}</Badge>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 text-xs text-[#5c6b94]">
+                            <CalendarClock className="h-3.5 w-3.5 text-[#4673eb]" />
+                            <span>
+                              Automatic Cutoff:{' '}
+                              <strong className="text-[#080b14]">
+                                {new Date(sd.cutoffAt).toLocaleString('en-IN')}
+                              </strong>
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 pt-1 text-xs">
+                            <div>
+                              <div className="flex justify-between text-[#4d5a83]">
+                                <span>Weight Utilized</span>
+                                <span>{sd.weightUtilizationPct}%</span>
+                              </div>
+                              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#eef3ff]">
+                                <div
+                                  className="h-full bg-[#080b14]"
+                                  style={{ width: `${sd.weightUtilizationPct}%` }}
+                                />
+                              </div>
+                              <p className="mt-0.5 text-[11px] text-[#7a87aa]">
+                                {sd.availableWeightKg.toFixed(0)} / {sd.capacityWeightKg} kg free
+                              </p>
+                            </div>
+
+                            <div>
+                              <div className="flex justify-between text-[#4d5a83]">
+                                <span>Volume Utilized</span>
+                                <span>{sd.volumeUtilizationPct}%</span>
+                              </div>
+                              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#eef3ff]">
+                                <div
+                                  className="h-full bg-[#4673eb]"
+                                  style={{ width: `${sd.volumeUtilizationPct}%` }}
+                                />
+                              </div>
+                              <p className="mt-0.5 text-[11px] text-[#7a87aa]">
+                                {sd.availableVolumeCbm.toFixed(2)} / {sd.capacityVolumeCbm} m³ free
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-[#e3ebfc] bg-[#f8faff] px-3.5 py-2.5 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[#5c6b94]">Projected Rate / Chargeable kg:</span>
+                              <strong className="text-[#080b14]">
+                                {formatPaise(sd.projectedRatePaisePerKg)} / kg
+                              </strong>
+                            </div>
+                            <div className="mt-0.5 flex items-center justify-between text-[11px] text-[#7a87aa]">
+                              <span>Configured Price Ceiling:</span>
+                              <span>{formatPaise(corridor.guaranteedCeilingPaisePerKg)} / kg</span>
+                            </div>
+                            {hasSampleWeight ? (
+                              <div className="mt-1.5 flex items-center justify-between border-t border-[#e3ebfc] pt-1.5 text-[11px]">
+                                <span className="text-[#4d5a83]">
+                                  Est. Freight ({parsedChargeableKg} kg):
+                                </span>
+                                <strong className="text-[#4673eb]">
+                                  {formatPaise(
+                                    Math.round(parsedChargeableKg * sd.projectedRatePaisePerKg)
+                                  )}
+                                </strong>
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="mt-4">
+                          {!sd.bookable ? (
+                            <button
+                              type="button"
+                              disabled
+                              className="inline-flex w-full items-center justify-center gap-1.5 rounded-2xl border border-[#d5ddf0] bg-[#f8faff] px-4 py-2.5 text-xs font-medium text-[#7a87aa]"
+                            >
+                              <Lock className="h-3.5 w-3.5" />
+                              {sd.status === 'LOCKED'
+                                ? 'Service Locked — Booking Closed'
+                                : sd.status === 'FULL'
+                                  ? 'Capacity Full — Choose Another Date'
+                                  : 'Booking Window Closed'}
+                            </button>
+                          ) : (
+                            <Link
+                              to={`/shipper/book?corridorId=${corridor._id}&serviceDate=${sd.serviceDate}`}
+                              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[#080b14] px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-[#192038]"
+                            >
+                              <PackagePlus className="h-4 w-4 text-[#82a2ff]" />
+                              Book Shipment
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }

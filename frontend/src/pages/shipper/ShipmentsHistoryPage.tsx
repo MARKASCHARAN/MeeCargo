@@ -22,14 +22,12 @@ import {
   payShipmentToken,
   resolveShipmentException,
   submitViabilityDecision,
-} from '../../api/client';
-import { ShipmentQrCode } from '../../components/shipments/ShipmentQrCode';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
-import { Card, CardContent, CardHeader } from '../../components/ui/Card';
-import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateViews';
-import { formatPaise } from '../../lib/format';
-import type { ExceptionRecord } from '../../types/api';
+} from '@/api/client';
+import { ShipmentQrCode } from '@/components/shipments/ShipmentQrCode';
+import { Badge } from '@/components/ui/Badge';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
+import { formatPaise } from '@/lib/format';
+import type { ExceptionRecord } from '@/types/api';
 
 export function ShipmentsHistoryPage() {
   const queryClient = useQueryClient();
@@ -149,116 +147,129 @@ export function ShipmentsHistoryPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Shipments & Bookings</h1>
-          <p className="text-sm text-slate-500">
-            Scoped exclusively to your B2B business ownership. Payments shown in prototype are simulated.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void exportShipmentsCsv({
-                statusGroup: statusGroup || undefined,
-                corridorId: corridorFilter || undefined,
-                fromDate: fromDate || undefined,
-                toDate: toDate || undefined,
-              }).then((csv) => {
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'meecargo-shipments-export.csv';
-                a.click();
-                URL.revokeObjectURL(url);
-              });
-            }}
-          >
-            <Download className="h-4 w-4" />
-            Export CSV
-          </Button>
-          <Link to="/shipper/import">
-            <Button variant="outline" size="sm">
+      {/* Obsidian Hero Header */}
+      <section className="orbit-reveal-1 relative overflow-hidden rounded-[28px] border border-[#1d2542] bg-[#080b14] p-6 text-white shadow-[0_24px_65px_-28px_rgba(8,11,20,0.65)] sm:p-8">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-12 -top-16 h-60 w-60 rounded-full bg-[radial-gradient(circle,rgba(70,115,235,0.28),transparent_70%)] blur-xl"
+        />
+        <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-[#8ea5e2]">
+              Shipment Ledger &amp; Recovery
+            </p>
+            <h1 className="mt-1.5 text-[28px] font-[550] leading-tight tracking-[-0.04em] text-white sm:text-[36px]">
+              Shipments &amp;{' '}
+              <em
+                className="font-orbit-serif text-[1.12em] font-normal text-[#82a2ff]"
+                style={{ fontStyle: 'italic' }}
+              >
+                bookings.
+              </em>
+            </h1>
+            <p className="mt-1 text-xs text-[#a8b5d6] sm:text-sm">
+              Scoped exclusively to your B2B business ownership. Payments shown are simulated.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                void exportShipmentsCsv({
+                  statusGroup: statusGroup || undefined,
+                  corridorId: corridorFilter || undefined,
+                  fromDate: fromDate || undefined,
+                  toDate: toDate || undefined,
+                }).then((csv) => {
+                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'meecargo-shipments-export.csv';
+                  a.click();
+                  URL.revokeObjectURL(url);
+                });
+              }}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-xs font-medium text-white transition hover:border-white/30 hover:bg-white/12"
+            >
+              <Download className="h-3.5 w-3.5 text-[#82a2ff]" />
+              Export CSV
+            </button>
+            <Link
+              to="/shipper/import"
+              className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-xs font-medium text-white transition hover:border-white/30 hover:bg-white/12"
+            >
               Import CSV
-            </Button>
-          </Link>
-          <Link to="/shipper/book">
-            <Button variant="primary" size="sm">
-              <PackagePlus className="h-4 w-4" />
+            </Link>
+            <Link
+              to="/shipper/book"
+              className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-semibold text-[#080b14] shadow-xs transition hover:-translate-y-0.5 hover:bg-[#eef3ff]"
+            >
+              <PackagePlus className="h-3.5 w-3.5 text-[#4673eb]" />
               New Booking
-            </Button>
-          </Link>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Filters */}
+      <div className="orbit-reveal-2 grid gap-3 rounded-[24px] border border-[#dce5fa] bg-white/95 p-5 shadow-xs sm:grid-cols-4">
+        <div>
+          <label className="mb-1.5 block text-[11px] font-medium text-[#4d5a83]">
+            Status Group
+          </label>
+          <select
+            value={statusGroup}
+            onChange={(e) => setStatusGroup(e.target.value)}
+            className="orbit-input-dark py-2 text-xs"
+          >
+            <option value="">All Shipments</option>
+            <option value="UPCOMING">Upcoming (Pending / Confirmed / Pooled / Locked)</option>
+            <option value="ACTIVE">Active (Picked Up / In Transit / At Destination)</option>
+            <option value="DELIVERED">Delivered</option>
+            <option value="FAILED">Failed</option>
+            <option value="CANCELLED">Cancelled</option>
+            <option value="ROLLED_OVER">Rolled Over</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[11px] font-medium text-[#4d5a83]">Corridor</label>
+          <select
+            value={corridorFilter}
+            onChange={(e) => setCorridorFilter(e.target.value)}
+            className="orbit-input-dark py-2 text-xs"
+          >
+            <option value="">All Corridors</option>
+            {corridors.map((c) => (
+              <option key={c._id} value={c._id}>
+                {c.code} — {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[11px] font-medium text-[#4d5a83]">From Date</label>
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="orbit-input-dark py-2 text-xs"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[11px] font-medium text-[#4d5a83]">To Date</label>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="orbit-input-dark py-2 text-xs"
+          />
         </div>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="grid gap-3 p-4 sm:grid-cols-4">
-          <div>
-            <label className="mb-1 block text-[11px] font-medium text-slate-600">
-              Status Group
-            </label>
-            <select
-              value={statusGroup}
-              onChange={(e) => setStatusGroup(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
-            >
-              <option value="">All Shipments</option>
-              <option value="UPCOMING">Upcoming (Pending / Confirmed / Pooled / Locked)</option>
-              <option value="ACTIVE">Active (Picked Up / In Transit / At Destination)</option>
-              <option value="DELIVERED">Delivered</option>
-              <option value="FAILED">Failed</option>
-              <option value="CANCELLED">Cancelled</option>
-              <option value="ROLLED_OVER">Rolled Over</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] font-medium text-slate-600">
-              Corridor
-            </label>
-            <select
-              value={corridorFilter}
-              onChange={(e) => setCorridorFilter(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs"
-            >
-              <option value="">All Corridors</option>
-              {corridors.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.code} — {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] font-medium text-slate-600">
-              From Date
-            </label>
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] font-medium text-slate-600">
-              To Date
-            </label>
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
       {actionMsg ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-900">
           {actionMsg}
         </div>
       ) : null}
@@ -268,15 +279,16 @@ export function ShipmentsHistoryPage() {
           title="No shipments booked yet"
           description="Create a single booking or bulk import orders via CSV."
           action={
-            <Link to="/shipper/book">
-              <Button variant="primary" size="sm">
-                Book First Shipment
-              </Button>
+            <Link
+              to="/shipper/book"
+              className="inline-flex items-center gap-1.5 rounded-2xl bg-[#080b14] px-4 py-2 text-xs font-semibold text-white"
+            >
+              Book First Shipment
             </Link>
           }
         />
       ) : (
-        <div className="space-y-4">
+        <div className="orbit-reveal-3 space-y-5">
           {shipments.map((s) => {
             const corridorIdStr =
               typeof s.corridorId === 'object' ? s.corridorId._id : s.corridorId;
@@ -309,11 +321,14 @@ export function ShipmentsHistoryPage() {
             const pricing = s.pricingSnapshot;
 
             return (
-              <Card key={s._id}>
-                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <article
+                key={s._id}
+                className="overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-[0_18px_50px_-28px_rgba(8,11,20,0.18)]"
+              >
+                <div className="flex flex-col gap-3 border-b border-[#eaf0fd] bg-[#f8faff] px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-sm font-bold text-emerald-700">
+                      <span className="rounded-lg bg-[#080b14] px-2.5 py-0.5 font-mono text-xs font-bold text-white">
                         {s.reference}
                       </span>
                       {s.externalOrderRef ? (
@@ -338,71 +353,71 @@ export function ShipmentsHistoryPage() {
                         </Badge>
                       ) : null}
                     </div>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {corridorName} • Service Date: {serviceDateLabel}
+                    <p className="mt-1.5 text-xs text-[#5c6b94]">
+                      {corridorName} • Service Date:{' '}
+                      <strong className="text-[#080b14]">{serviceDateLabel}</strong>
                     </p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
                     {s.status === 'PENDING_TOKEN' ? (
-                      <Button
-                        size="sm"
-                        variant="primary"
+                      <button
+                        type="button"
                         disabled={payMutation.isPending}
                         onClick={() => payMutation.mutate(s._id)}
+                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#080b14] px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-[#192038] disabled:opacity-50"
                       >
-                        <CreditCard className="h-3.5 w-3.5" />
+                        <CreditCard className="h-3.5 w-3.5 text-[#82a2ff]" />
                         Pay Token (Simulated)
-                      </Button>
+                      </button>
                     ) : null}
 
                     {['PENDING_TOKEN', 'CONFIRMED', 'POOLED'].includes(s.status) ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <button
+                        type="button"
                         disabled={cancelMutation.isPending}
                         onClick={() => cancelMutation.mutate(s._id)}
+                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#d5ddf0] bg-white px-3 py-2 text-xs font-medium text-[#080b14] transition hover:border-rose-300 hover:text-rose-700 disabled:opacity-50"
                       >
                         <XCircle className="h-3.5 w-3.5" />
-                        Cancel & Refund
-                      </Button>
+                        Cancel &amp; Refund
+                      </button>
                     ) : null}
 
-                    <Link to={`/track/${s.trackingToken}`}>
-                      <Button size="sm" variant="outline">
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Recipient Link
-                      </Button>
+                    <Link
+                      to={`/track/${s.trackingToken}`}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#d5ddf0] bg-white px-3.5 py-2 text-xs font-semibold text-[#080b14] transition hover:border-[#080b14]"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5 text-[#4673eb]" />
+                      Recipient Link
                     </Link>
                   </div>
-                </CardHeader>
+                </div>
 
-                <CardContent className="space-y-4">
-                  <div className="grid gap-3 text-xs text-slate-600 sm:grid-cols-4">
+                <div className="space-y-4 p-6">
+                  <div className="grid gap-3 text-xs text-[#5c6b94] sm:grid-cols-4">
                     <div>
-                      <span className="text-slate-400">Route Stops</span>
-                      <p className="mt-0.5 font-semibold text-slate-900">
+                      <span className="text-[11px] text-[#7a87aa]">Route Stops</span>
+                      <p className="mt-0.5 font-semibold text-[#080b14]">
                         {s.pickupStopCode} → {s.deliveryStopCode}
                       </p>
                     </div>
                     <div>
-                      <span className="text-slate-400">Recipient</span>
-                      <p className="mt-0.5 font-semibold text-slate-900">
+                      <span className="text-[11px] text-[#7a87aa]">Recipient</span>
+                      <p className="mt-0.5 font-semibold text-[#080b14]">
                         {s.recipientName} ({s.deliveryAddress.villageOrTown})
                       </p>
                     </div>
                     <div>
-                      <span className="text-slate-400">Cargo & Chargeable Wt</span>
-                      <p className="mt-0.5 font-semibold text-slate-900">
-                        {s.cargo.quantity}× {s.cargo.category} •{' '}
-                        {s.cargo.chargeableWeightKg} kg ({s.cargo.billingBasis})
+                      <span className="text-[11px] text-[#7a87aa]">Cargo &amp; Chargeable Wt</span>
+                      <p className="mt-0.5 font-semibold text-[#080b14]">
+                        {s.cargo.quantity}× {s.cargo.category} • {s.cargo.chargeableWeightKg} kg (
+                        {s.cargo.billingBasis})
                       </p>
                     </div>
                     <div>
-                      <span className="text-slate-400">Volume (separate)</span>
-                      <p className="mt-0.5 font-semibold text-slate-900">
-                        {s.cargo.volumeCbm} m³
-                      </p>
+                      <span className="text-[11px] text-[#7a87aa]">Volume (separate)</span>
+                      <p className="mt-0.5 font-semibold text-[#080b14]">{s.cargo.volumeCbm} m³</p>
                     </div>
                   </div>
 
@@ -411,40 +426,40 @@ export function ShipmentsHistoryPage() {
                   ) : null}
 
                   {pricing ? (
-                    <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs sm:grid-cols-5">
+                    <div className="grid gap-3 rounded-2xl border border-[#1d2542] bg-[#080b14] p-4 text-xs text-white sm:grid-cols-5">
                       <div>
-                        <span className="text-slate-500">Rate Ceiling</span>
-                        <p className="font-semibold text-slate-900">
+                        <span className="text-[#9aa7c7]">Rate Ceiling</span>
+                        <p className="mt-0.5 font-semibold">
                           {formatPaise(pricing.ceilingPricePaise)}
                         </p>
                       </div>
                       <div>
-                        <span className="text-slate-500">
+                        <span className="text-[#9aa7c7]">
                           {pricing.finalLockedPricePaise !== undefined
                             ? 'Final Locked Price'
                             : 'Projected (Non-Final)'}
                         </span>
-                        <p className="font-bold text-slate-900">
+                        <p className="mt-0.5 font-bold">
                           {formatPaise(
                             pricing.finalLockedPricePaise ?? pricing.projectedPricePaise
                           )}
                         </p>
                       </div>
                       <div>
-                        <span className="text-slate-500">Discounts (Pool + Anchor)</span>
-                        <p className="font-semibold text-emerald-700">
+                        <span className="text-[#9aa7c7]">Discounts (Pool + Anchor)</span>
+                        <p className="mt-0.5 font-semibold text-emerald-400">
                           -{formatPaise(pricing.poolDiscountPaise + pricing.anchorDiscountPaise)}
                         </p>
                       </div>
                       <div>
-                        <span className="text-slate-500">Token Paid (Simulated)</span>
-                        <p className="font-semibold text-slate-900">
+                        <span className="text-[#9aa7c7]">Token Paid (Simulated)</span>
+                        <p className="mt-0.5 font-semibold">
                           {formatPaise(pricing.tokenPaidPaise)}
                         </p>
                       </div>
                       <div>
-                        <span className="text-slate-500">Pickup Balance</span>
-                        <p className="font-bold text-sky-800">
+                        <span className="text-[#9aa7c7]">Pickup Balance</span>
+                        <p className="mt-0.5 font-bold text-[#82a2ff]">
                           {formatPaise(pricing.remainingBalancePaise)}
                         </p>
                       </div>
@@ -452,7 +467,7 @@ export function ShipmentsHistoryPage() {
                   ) : null}
 
                   {s.pickupCollectionSummary ? (
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#cddbfa] bg-[#eef3ff] px-4 py-2.5 text-xs text-[#080b14]">
                       <span>
                         Pickup Balance Collected:{' '}
                         <strong>
@@ -469,9 +484,9 @@ export function ShipmentsHistoryPage() {
                   ) : null}
 
                   {s.podSummary ? (
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-950">
                       <div className="flex items-center gap-2">
-                        <CheckCircle2 className="h-4 w-4" />
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                         <span>
                           POD Verified ({s.podSummary.confirmationMode}) at{' '}
                           {new Date(s.podSummary.verifiedAt).toLocaleString()}
@@ -494,7 +509,7 @@ export function ShipmentsHistoryPage() {
                   ) : null}
 
                   {s.viabilityDecision === 'PENDING_CHOICE' ? (
-                    <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs">
+                    <div className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs">
                       <div className="flex items-start gap-2 text-amber-950">
                         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                         <div>
@@ -519,23 +534,25 @@ export function ShipmentsHistoryPage() {
                                   [s._id]: e.target.value,
                                 }))
                               }
-                              className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs"
+                              className="rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs text-[#080b14]"
                             >
                               {futureServiceDates.map((sd) => (
                                 <option key={sd.serviceDate} value={sd.serviceDate}>
-                                  {new Date(sd.departureDate ?? sd.serviceDate).toLocaleDateString('en-IN', {
-                                    weekday: 'short',
-                                    day: '2-digit',
-                                    month: 'short',
-                                    year: 'numeric',
-                                  })}{' '}
+                                  {new Date(sd.departureDate ?? sd.serviceDate).toLocaleDateString(
+                                    'en-IN',
+                                    {
+                                      weekday: 'short',
+                                      day: '2-digit',
+                                      month: 'short',
+                                      year: 'numeric',
+                                    }
+                                  )}{' '}
                                   ({sd.availableWeightKg.toFixed(0)} kg free)
                                 </option>
                               ))}
                             </select>
-                            <Button
-                              size="sm"
-                              variant="primary"
+                            <button
+                              type="button"
                               disabled={viabilityMutation.isPending}
                               onClick={() =>
                                 viabilityMutation.mutate({
@@ -544,10 +561,11 @@ export function ShipmentsHistoryPage() {
                                   targetServiceDate: selectedRolloverDate,
                                 })
                               }
+                              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#080b14] px-3.5 py-2 text-xs font-semibold text-white"
                             >
                               <RotateCcw className="h-3.5 w-3.5" />
-                              Consent & Roll Over
-                            </Button>
+                              Consent &amp; Roll Over
+                            </button>
                           </>
                         ) : (
                           <span className="text-amber-900">
@@ -555,9 +573,8 @@ export function ShipmentsHistoryPage() {
                           </span>
                         )}
 
-                        <Button
-                          size="sm"
-                          variant="danger"
+                        <button
+                          type="button"
                           disabled={viabilityMutation.isPending}
                           onClick={() =>
                             viabilityMutation.mutate({
@@ -565,24 +582,30 @@ export function ShipmentsHistoryPage() {
                               decision: 'REFUND',
                             })
                           }
+                          className="cursor-pointer rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-semibold text-white"
                         >
                           Request Full Token Refund
-                        </Button>
+                        </button>
                       </div>
                     </div>
                   ) : null}
 
-                  {['FAILED', 'PARTIALLY_DELIVERED', 'RETURNED', 'LOCKED', 'PICKED_UP', 'IN_TRANSIT', 'AT_DESTINATION'].includes(
-                    s.status
-                  ) ? (
-                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
+                  {[
+                    'FAILED',
+                    'PARTIALLY_DELIVERED',
+                    'RETURNED',
+                    'LOCKED',
+                    'PICKED_UP',
+                    'IN_TRANSIT',
+                    'AT_DESTINATION',
+                  ].includes(s.status) ? (
+                    <div className="space-y-2.5 rounded-2xl border border-[#dce5fa] bg-[#f8faff] p-4 text-xs">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-800">
+                        <span className="font-semibold text-[#080b14]">
                           Delivery Exceptions &amp; Recovery Actions
                         </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
+                        <button
+                          type="button"
                           onClick={() => {
                             const nextId =
                               expandedExceptionShipmentId === s._id ? null : s._id;
@@ -598,33 +621,32 @@ export function ShipmentsHistoryPage() {
                                 .catch(() => undefined);
                             }
                           }}
+                          className="cursor-pointer rounded-xl border border-[#d5ddf0] bg-white px-3 py-1.5 text-xs font-semibold text-[#080b14] transition hover:border-[#080b14]"
                         >
                           {expandedExceptionShipmentId === s._id
                             ? 'Hide Exceptions'
                             : 'Check Exceptions'}
-                        </Button>
+                        </button>
                       </div>
 
                       {expandedExceptionShipmentId === s._id ? (
                         <div className="space-y-2 pt-1">
                           {(shipmentExceptions[s._id] ?? []).length === 0 ? (
-                            <p className="text-slate-500">
+                            <p className="text-[#5c6b94]">
                               No delivery or route exceptions recorded for this shipment.
                             </p>
                           ) : (
                             (shipmentExceptions[s._id] ?? []).map((ex) => (
                               <div
                                 key={ex._id}
-                                className="space-y-2 rounded border border-rose-200 bg-white p-2.5"
+                                className="space-y-2 rounded-xl border border-rose-200 bg-white p-3"
                               >
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <span className="font-semibold text-rose-950">
                                     {ex.exceptionType}: {ex.reason}
                                   </span>
                                   <Badge
-                                    variant={
-                                      ex.resolutionStatus === 'OPEN' ? 'warning' : 'success'
-                                    }
+                                    variant={ex.resolutionStatus === 'OPEN' ? 'warning' : 'success'}
                                   >
                                     {ex.resolutionStatus}
                                   </Badge>
@@ -645,11 +667,13 @@ export function ShipmentsHistoryPage() {
                                               [ex._id]: e.target.value,
                                             }))
                                           }
-                                          className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                                          className="rounded-xl border border-[#d5ddf0] bg-[#f8faff] px-2.5 py-1.5 text-xs text-[#080b14]"
                                         >
                                           {futureServiceDates.map((sd) => (
                                             <option key={sd.serviceDate} value={sd.serviceDate}>
-                                              {new Date(sd.departureDate ?? sd.serviceDate).toLocaleDateString('en-IN', {
+                                              {new Date(
+                                                sd.departureDate ?? sd.serviceDate
+                                              ).toLocaleDateString('en-IN', {
                                                 weekday: 'short',
                                                 day: '2-digit',
                                                 month: 'short',
@@ -659,9 +683,8 @@ export function ShipmentsHistoryPage() {
                                             </option>
                                           ))}
                                         </select>
-                                        <Button
-                                          size="sm"
-                                          variant="primary"
+                                        <button
+                                          type="button"
                                           onClick={() => {
                                             const targetServiceDate =
                                               rescheduleSlots[ex._id] ??
@@ -683,14 +706,14 @@ export function ShipmentsHistoryPage() {
                                               );
                                             });
                                           }}
+                                          className="cursor-pointer rounded-xl bg-[#080b14] px-3 py-1.5 text-xs font-semibold text-white"
                                         >
                                           Reschedule Date
-                                        </Button>
+                                        </button>
                                       </>
                                     ) : null}
-                                    <Button
-                                      size="sm"
-                                      variant="danger"
+                                    <button
+                                      type="button"
                                       onClick={() => {
                                         void resolveShipmentException(ex._id, {
                                           action: 'RETURN',
@@ -708,9 +731,10 @@ export function ShipmentsHistoryPage() {
                                           );
                                         });
                                       }}
+                                      className="cursor-pointer rounded-xl bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white"
                                     >
                                       Mark Returned
-                                    </Button>
+                                    </button>
                                   </div>
                                 ) : null}
                               </div>
@@ -720,8 +744,8 @@ export function ShipmentsHistoryPage() {
                       ) : null}
                     </div>
                   ) : null}
-                </CardContent>
-              </Card>
+                </div>
+              </article>
             );
           })}
         </div>
