@@ -6,12 +6,16 @@ import {
   DriverSlotCommitment,
   type IDriverSlotCommitment,
 } from '../models/DriverSlotCommitment.js';
-import type { IPool } from '../models/Pool.js';
+import type { IPool, PoolAllocationCandidateAudit } from '../models/Pool.js';
 import type { IShipment } from '../models/Shipment.js';
 import type { ISlot } from '../models/Slot.js';
 import { Trip, type TripAllocationEconomics } from '../models/Trip.js';
 import { Vehicle, type BedDimensionsCm, type IVehicle } from '../models/Vehicle.js';
-import { isSameCalendarDay, resolveSlotNumber } from './driverSlotService.js';
+import {
+  isContractActiveOnServiceDate,
+  isSameCalendarDay,
+  resolveSlotNumber,
+} from './driverSlotService.js';
 
 export interface VehicleFeasibilityResult {
   feasible: boolean;
@@ -48,6 +52,8 @@ export function doesCargoFitVehicle(
   const bed: BedDimensionsCm = vehicle.bedDimensionsCm;
   const bedFootprintMax = Math.max(bed.length, bed.width);
   const bedFootprintMin = Math.min(bed.length, bed.width);
+  const totalBedAreaSqCm = bed.length * bed.width;
+  let nonStackableFloorAreaSqCm = 0;
 
   for (const s of shipments) {
     const { length, width, height } = s.cargo.unitDimensionsCm;
@@ -65,6 +71,11 @@ export function doesCargoFitVehicle(
       };
     }
 
+    if (s.cargo.stackable === false) {
+      const qty = Math.max(1, s.cargo.quantity ?? 1);
+      nonStackableFloorAreaSqCm += length * width * qty;
+    }
+
     const blockedRestriction = (s.cargo.handlingRestrictions ?? []).find((r) =>
       (vehicle.operatingRestrictions ?? []).includes(`NO_${r.toUpperCase()}`)
     );
@@ -74,6 +85,13 @@ export function doesCargoFitVehicle(
         reason: `Vehicle operating restriction blocks ${blockedRestriction}`,
       };
     }
+  }
+
+  if (nonStackableFloorAreaSqCm > totalBedAreaSqCm) {
+    return {
+      feasible: false,
+      reason: `Non-stackable cargo floor footprint (${nonStackableFloorAreaSqCm} cm²) exceeds vehicle bed floor area (${totalBedAreaSqCm} cm²)`,
+    };
   }
 
   return { feasible: true };
@@ -135,6 +153,7 @@ export interface FleetAllocationOutcome {
   vehicle?: IVehicle;
   commitment?: IDriverSlotCommitment;
   economics?: TripAllocationEconomics;
+  candidateAudit?: PoolAllocationCandidateAudit[];
   reason: string;
 }
 
@@ -145,6 +164,7 @@ export async function allocateVehicleForPool(params: {
   shipments: IShipment[];
   estimatedDistanceKm?: number;
   allowRightSizing?: boolean;
+  allowMarketplaceFallback?: boolean;
   isBackhaul?: boolean;
   session?: ClientSession | null;
 }): Promise<FleetAllocationOutcome> {
@@ -153,10 +173,28 @@ export async function allocateVehicleForPool(params: {
     slot,
     shipments,
     estimatedDistanceKm = 115,
-    allowRightSizing = true,
+    allowRightSizing = false,
+    allowMarketplaceFallback = false,
     isBackhaul = false,
     session = null,
   } = params;
+  const candidateAudit: PoolAllocationCandidateAudit[] = [];
+  const auditNow = new Date();
+  const recordAudit = (
+    v: Pick<IVehicle, '_id' | 'driverId' | 'registrationNumber' | 'tier'>,
+    decision: 'ACCEPTED' | 'REJECTED',
+    reason: string
+  ) => {
+    candidateAudit.push({
+      vehicleId: v._id,
+      ...(v.driverId ? { driverUserId: v.driverId } : {}),
+      registrationNumber: v.registrationNumber,
+      tier: v.tier,
+      decision,
+      reason,
+      at: auditNow,
+    });
+  };
 
   if (shipments.length === 0) {
     return {
@@ -217,24 +255,34 @@ export async function allocateVehicleForPool(params: {
       })
       .map((c) => [String(c.driverUserId), c])
   );
-  const slotDateMs = new Date(slot.departureDate).getTime();
-
   const activeContractByDriverId = new Map(
     activeContracts
-      .filter((c) => {
-        const startMs = new Date(c.startDate).getTime();
-        const endMs = new Date(c.endDate).getTime();
-        return slotDateMs >= startMs && slotDateMs <= endMs;
-      })
+      .filter((c) =>
+        isContractActiveOnServiceDate(
+          c,
+          slot.departureDate,
+          corridor.timezone ?? 'Asia/Kolkata'
+        )
+      )
       .map((c) => [String(c.driverUserId), c])
   );
 
-  const candidateVehicles = allVehicles.filter(
-    (v) =>
-      !busyVehicleIds.has(String(v._id)) &&
-      isVehicleAvailableForSlot(v, slot) &&
-      doesCargoFitVehicle(shipments, v).feasible
-  );
+  const candidateVehicles = allVehicles.filter((v) => {
+    if (busyVehicleIds.has(String(v._id))) {
+      recordAudit(v, 'REJECTED', 'Vehicle already assigned to overlapping active trip');
+      return false;
+    }
+    if (!isVehicleAvailableForSlot(v, slot)) {
+      recordAudit(v, 'REJECTED', 'Vehicle unavailable or operationally inactive for slot date');
+      return false;
+    }
+    const fit = doesCargoFitVehicle(shipments, v);
+    if (!fit.feasible) {
+      recordAudit(v, 'REJECTED', fit.reason ?? 'Cargo fails vehicle capacity/dimension fit');
+      return false;
+    }
+    return true;
+  });
 
   // Determine contractual Tier 1 min guarantee baseline across active corridor-eligible Tier 1 contracts
   const contractedTier1All = allVehicles.filter((v) => {
@@ -259,30 +307,58 @@ export async function allocateVehicleForPool(params: {
   // 1. Tier 1 driver-owned contract vehicles eligible for this corridor & slot schedule
   const feasibleTier1 = candidateVehicles.filter((v) => {
     if (v.tier !== 'TIER_1') return false;
-    if (v.ownershipType && v.ownershipType !== 'DRIVER_OWNED') return false;
-    if (!v.driverId) return false;
+    if (v.ownershipType && v.ownershipType !== 'DRIVER_OWNED') {
+      recordAudit(v, 'REJECTED', 'Tier 1 vehicle is not DRIVER_OWNED');
+      return false;
+    }
+    if (!v.driverId) {
+      recordAudit(v, 'REJECTED', 'Tier 1 vehicle has no owning driverId');
+      return false;
+    }
 
     const driverIdStr = String(v.driverId);
-    if (busyDriverIds.has(driverIdStr)) return false;
+    if (busyDriverIds.has(driverIdStr)) {
+      recordAudit(v, 'REJECTED', 'Driver is already assigned to overlapping trip');
+      return false;
+    }
 
     const driverProfile = profileByDriverId.get(driverIdStr);
-    if (!driverProfile) return false;
-    if (driverProfile.accountStatus && driverProfile.accountStatus !== 'ACTIVE') return false;
-    if (driverProfile.availabilityStatus !== 'AVAILABLE') return false;
+    if (!driverProfile) {
+      recordAudit(v, 'REJECTED', 'No active Tier 1 DriverProfile found');
+      return false;
+    }
+    if (driverProfile.accountStatus && driverProfile.accountStatus !== 'ACTIVE') {
+      recordAudit(v, 'REJECTED', `Driver account status is ${driverProfile.accountStatus}`);
+      return false;
+    }
+    if (driverProfile.availabilityStatus !== 'AVAILABLE') {
+      recordAudit(v, 'REJECTED', `Driver availability status is ${driverProfile.availabilityStatus}`);
+      return false;
+    }
 
     const contract = activeContractByDriverId.get(driverIdStr);
-    if (!contract || contract.status !== 'ACTIVE') return false;
+    if (!contract || contract.status !== 'ACTIVE') {
+      recordAudit(v, 'REJECTED', 'No active contract covers slot operating date');
+      return false;
+    }
 
     const corridorAllowed = contract.eligibleCorridorIds.some((cid) =>
       cid.equals(corridor._id)
     );
-    if (!corridorAllowed) return false;
+    if (!corridorAllowed) {
+      recordAudit(v, 'REJECTED', 'Driver contract does not include this corridor');
+      return false;
+    }
 
     // MC-048/MC-049/MC-050: Tier 1 participation is derived from validated pooling-window
     // slot commitments rather than permanent contract slot assignments.
     const commitment = commitmentByDriverId.get(driverIdStr);
-    if (!commitment) return false;
+    if (!commitment) {
+      recordAudit(v, 'REJECTED', 'No matching LOCKED slot commitment for this slot/date/corridor');
+      return false;
+    }
     if (commitment.vehicleId && String(commitment.vehicleId) !== String(v._id)) {
+      recordAudit(v, 'REJECTED', 'Vehicle does not match vehicle recorded on LOCKED commitment');
       return false;
     }
     return true;
@@ -291,18 +367,21 @@ export async function allocateVehicleForPool(params: {
   // Sort Tier 1 by smallest driver-owned vehicle that fits
   feasibleTier1.sort((a, b) => a.maxWeightKg - b.maxWeightKg);
 
-  const feasibleTier2 = candidateVehicles
-    .filter((v) => {
-      if (v.tier !== 'TIER_2') return false;
-      if (v.driverId) {
-        const dp = tier2ProfilesByDriverId.get(String(v.driverId));
-        if (dp && (dp.accountStatus !== 'ACTIVE' || dp.tier2ApplicationStatus !== 'APPROVED')) {
-          return false;
-        }
-      }
-      return true;
-    })
-    .sort((a, b) => a.maxWeightKg - b.maxWeightKg);
+  const feasibleTier2 = allowMarketplaceFallback
+    ? candidateVehicles
+        .filter((v) => {
+          if (v.tier !== 'TIER_2') return false;
+          if (v.driverId) {
+            const dp = tier2ProfilesByDriverId.get(String(v.driverId));
+            if (dp && (dp.accountStatus !== 'ACTIVE' || dp.tier2ApplicationStatus !== 'APPROVED')) {
+              recordAudit(v, 'REJECTED', 'Tier 2 applicant is not APPROVED/ACTIVE');
+              return false;
+            }
+          }
+          return true;
+        })
+        .sort((a, b) => a.maxWeightKg - b.maxWeightKg)
+    : [];
 
   // Policy: Tier 1 driver-owned contracted capacity with valid slot commitment is evaluated first
   if (feasibleTier1.length > 0) {
@@ -321,15 +400,17 @@ export async function allocateVehicleForPool(params: {
       2400;
     const tier1Payout = Math.max(minG, Math.round(perKm * estimatedDistanceKm));
 
-    if (allowRightSizing && feasibleTier2.length > 0) {
+    if (allowRightSizing && allowMarketplaceFallback && feasibleTier2.length > 0) {
       const bestTier2 = feasibleTier2[0];
       const tier2Payout = computeVehiclePayoutPaise(bestTier2, estimatedDistanceKm);
       const combinedRightSizedCost = tier1ContractedMinGuarantee + tier2Payout;
 
       if (combinedRightSizedCost < tier1Payout) {
+        recordAudit(bestTier2, 'ACCEPTED', 'Right-sized Tier 2 marketplace vehicle with Tier 1 guarantee preserved');
         return {
           allocated: true,
           vehicle: bestTier2,
+          candidateAudit,
           economics: {
             allocatedTier: 'TIER_2',
             tier1MinGuaranteeIncludedPaise: tier1ContractedMinGuarantee,
@@ -346,10 +427,15 @@ export async function allocateVehicleForPool(params: {
       }
     }
 
+    recordAudit(bestTier1, 'ACCEPTED', 'Allocated Tier 1 driver-owned contract vehicle with validated LOCKED slot commitment');
+    for (const runnerUp of feasibleTier1.slice(1)) {
+      recordAudit(runnerUp, 'REJECTED', 'Valid candidate not selected (right-sized smaller Tier 1 vehicle selected)');
+    }
     return {
       allocated: true,
       vehicle: bestTier1,
       commitment: selectedCommitment,
+      candidateAudit,
       economics: {
         allocatedTier: 'TIER_1',
         tier1MinGuaranteeIncludedPaise: minG,
@@ -363,13 +449,15 @@ export async function allocateVehicleForPool(params: {
     };
   }
 
-  // 2. Tier 2 independent marketplace overflow / non-contracted capacity
-  if (feasibleTier2.length > 0) {
+  // 2. Tier 2 independent marketplace overflow ONLY when explicitly enabled (outside Tier 1 MVP pool phase)
+  if (allowMarketplaceFallback && feasibleTier2.length > 0) {
     const bestTier2 = feasibleTier2[0];
     const tier2Payout = computeVehiclePayoutPaise(bestTier2, estimatedDistanceKm);
+    recordAudit(bestTier2, 'ACCEPTED', 'Allocated Tier 2 marketplace vehicle');
     return {
       allocated: true,
       vehicle: bestTier2,
+      candidateAudit,
       economics: {
         allocatedTier: 'TIER_2',
         tier1MinGuaranteeIncludedPaise: tier1ContractedMinGuarantee,
@@ -385,8 +473,8 @@ export async function allocateVehicleForPool(params: {
     };
   }
 
-  // 3. Tier 3 strictly for return/backhaul work
-  if (isBackhaul) {
+  // 3. Tier 3 strictly for return/backhaul work when explicitly enabled
+  if (isBackhaul && allowMarketplaceFallback) {
     const feasibleTier3 = candidateVehicles
       .filter((v) => v.tier === 'TIER_3' && v.supportsBackhaul)
       .sort((a, b) => a.maxWeightKg - b.maxWeightKg);
@@ -394,9 +482,11 @@ export async function allocateVehicleForPool(params: {
     if (feasibleTier3.length > 0) {
       const bestTier3 = feasibleTier3[0];
       const tier3Payout = computeVehiclePayoutPaise(bestTier3, estimatedDistanceKm);
+      recordAudit(bestTier3, 'ACCEPTED', 'Allocated Tier 3 backhaul vehicle');
       return {
         allocated: true,
         vehicle: bestTier3,
+        candidateAudit,
         economics: {
           allocatedTier: 'TIER_3',
           tier1MinGuaranteeIncludedPaise: tier1ContractedMinGuarantee,
@@ -414,7 +504,8 @@ export async function allocateVehicleForPool(params: {
   // Fail safely — never create an impossible trip
   return {
     allocated: false,
+    candidateAudit,
     reason:
-      'No feasible driver-owned or marketplace vehicle meets weight, volume, dimension, contract, schedule, and fleet tier requirements. Flagged for rollover or refund.',
+      'No feasible locked Tier 1 driver-owned vehicle meets weight, volume, dimension, contract, and schedule requirements. Flagged for rollover or refund.',
   };
 }

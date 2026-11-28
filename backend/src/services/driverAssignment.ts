@@ -209,15 +209,20 @@ export async function allocateAndAssignTripForPool(params: {
       throw new HttpError(404, 'Corridor or slot missing', 'NOT_FOUND');
     }
 
-    // Step 1: Vehicle allocation & tier hierarchy
+    // Step 1: Vehicle allocation & tier hierarchy (Tier 1 scheduled pools stay strictly Tier 1)
     const allocation = await allocateVehicleForPool({
       pool,
       corridor,
       slot,
       shipments,
-      allowRightSizing,
+      allowRightSizing: false,
+      allowMarketplaceFallback: false,
       session,
     });
+
+    if (allocation.candidateAudit && allocation.candidateAudit.length > 0) {
+      pool.allocationAudit = allocation.candidateAudit;
+    }
 
     if (!allocation.allocated || !allocation.vehicle) {
       pool.status = 'AWAITING_VIABILITY_DECISION';
@@ -227,7 +232,17 @@ export async function allocateAndAssignTripForPool(params: {
 
       await DriverSlotCommitment.updateMany(
         { slotId: slot._id, status: 'LOCKED' },
-        { $set: { status: 'NOT_ALLOCATED' } },
+        {
+          $set: { status: 'NOT_ALLOCATED' },
+          $push: {
+            auditHistory: {
+              action: 'NOT_ALLOCATED',
+              status: 'NOT_ALLOCATED',
+              at: new Date(),
+              note: allocation.reason,
+            },
+          },
+        },
         { session: session ?? undefined }
       );
 
@@ -353,66 +368,107 @@ export async function allocateAndAssignTripForPool(params: {
         })()
       : slot.estimatedArrivalEndAt;
 
-    const [trip] = await Trip.create(
-      [
-        {
-          tripCode,
-          poolId: pool._id,
-          corridorId: corridor._id,
-          slotId: slot._id,
-          ...(allocation.commitment ? { sourceCommitmentId: allocation.commitment._id } : {}),
-          vehicleId: allocation.vehicle._id,
-          driverId: eligibleDriver.userId,
-          shipmentIds: shipments.map((s) => s._id),
-          status: 'ASSIGNED',
-          scheduleSnapshot: {
-            serviceDate: slot.departureDate,
-            slotNumber: allocation.commitment?.slotNumber ?? resolveSlotNumber(slot) ?? undefined,
-            slotCode: slot.slotCode,
-            slotLabel: slot.label,
-            outboundPickupTime,
-            selectedReturnTime,
-            returnTimeLocked: Boolean(slot.returnTimeLocked ?? snapSource?.returnTimeLocked),
-          },
-          vehicleSnapshot: {
-            registrationNumber: allocation.vehicle.registrationNumber,
-            vehicleClass: allocation.vehicle.vehicleClass,
-            bodyType: allocation.vehicle.bodyType,
-            maxWeightKg: allocation.vehicle.maxWeightKg,
-            maxVolumeCbm: allocation.vehicle.maxVolumeCbm,
-            bedDimensionsCm: allocation.vehicle.bedDimensionsCm,
-            ownershipType: allocation.vehicle.ownershipType,
-          },
-          plannedDepartureAt: slot.plannedDepartureAt,
-          estimatedEndAt,
-          stopsSummary: corridor.stops.map((s) => ({
-            stopCode: s.stopCode,
-            name: s.name,
-            sequenceOrder: s.sequenceOrder,
-          })),
-          allocationEconomics: allocation.economics,
-          assignmentHistory: [
-            {
-              driverId: eligibleDriver.userId,
-              vehicleId: allocation.vehicle._id,
-              action: 'ASSIGNED',
-              reason: allocation.reason,
-              ...(actorUserId && isValidObjectId(actorUserId)
-                ? { actorUserId }
-                : {}),
-              at: new Date(),
+    let trip: ITrip;
+    try {
+      const [createdTrip] = await Trip.create(
+        [
+          {
+            tripCode,
+            poolId: pool._id,
+            corridorId: corridor._id,
+            slotId: slot._id,
+            ...(allocation.commitment ? { sourceCommitmentId: allocation.commitment._id } : {}),
+            vehicleId: allocation.vehicle._id,
+            driverId: eligibleDriver.userId,
+            shipmentIds: shipments.map((s) => s._id),
+            status: 'ASSIGNED',
+            scheduleSnapshot: {
+              serviceDate: slot.departureDate,
+              slotNumber: allocation.commitment?.slotNumber ?? resolveSlotNumber(slot) ?? undefined,
+              slotCode: slot.slotCode,
+              slotLabel: slot.label,
+              outboundPickupTime,
+              selectedReturnTime,
+              returnTimeLocked: Boolean(slot.returnTimeLocked ?? snapSource?.returnTimeLocked),
             },
-          ],
-          notes: allocation.reason,
-        },
-      ],
-      { session: session ?? undefined }
-    );
+            vehicleSnapshot: {
+              registrationNumber: allocation.vehicle.registrationNumber,
+              vehicleClass: allocation.vehicle.vehicleClass,
+              bodyType: allocation.vehicle.bodyType,
+              maxWeightKg: allocation.vehicle.maxWeightKg,
+              maxVolumeCbm: allocation.vehicle.maxVolumeCbm,
+              bedDimensionsCm: allocation.vehicle.bedDimensionsCm,
+              ownershipType: allocation.vehicle.ownershipType,
+            },
+            plannedDepartureAt: slot.plannedDepartureAt,
+            estimatedEndAt,
+            stopsSummary: corridor.stops.map((s) => ({
+              stopCode: s.stopCode,
+              name: s.name,
+              sequenceOrder: s.sequenceOrder,
+            })),
+            allocationEconomics: allocation.economics,
+            assignmentHistory: [
+              {
+                driverId: eligibleDriver.userId,
+                vehicleId: allocation.vehicle._id,
+                action: 'ASSIGNED',
+                reason: allocation.reason,
+                ...(actorUserId && isValidObjectId(actorUserId)
+                  ? { actorUserId }
+                  : {}),
+                at: new Date(),
+              },
+            ],
+            notes: allocation.reason,
+          },
+        ],
+        { session: session ?? undefined }
+      );
+      trip = createdTrip;
+    } catch (err: unknown) {
+      const isDup =
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        (err as { code?: number }).code === 11000;
+      if (isDup) {
+        const dupTrip = await Trip.findOne({ poolId: pool._id }).session(session);
+        if (dupTrip) {
+          return {
+            allocated: true,
+            driverAssigned: true,
+            trip: dupTrip,
+            idempotentHit: true,
+            reason: 'Trip already allocated and assigned for this pool.',
+          };
+        }
+      }
+      throw err;
+    }
+
+    if (allocation.candidateAudit && allocation.candidateAudit.length > 0) {
+      await Pool.updateOne(
+        { _id: pool._id },
+        { $set: { allocationAudit: allocation.candidateAudit } },
+        { session: session ?? undefined }
+      );
+    }
 
     if (allocation.commitment) {
       await DriverSlotCommitment.updateOne(
         { _id: allocation.commitment._id },
-        { $set: { status: 'ALLOCATED', poolId: pool._id, allocatedAt: new Date() } },
+        {
+          $set: { status: 'ALLOCATED', poolId: pool._id, allocatedAt: new Date() },
+          $push: {
+            auditHistory: {
+              action: 'ALLOCATED',
+              status: 'ALLOCATED',
+              at: new Date(),
+              note: `Allocated to trip ${trip.tripCode}`,
+            },
+          },
+        },
         { session: session ?? undefined }
       );
       await DriverSlotCommitment.updateMany(
@@ -421,13 +477,33 @@ export async function allocateAndAssignTripForPool(params: {
           status: { $in: ['LOCKED', 'COMMITTED'] },
           _id: { $ne: allocation.commitment._id },
         },
-        { $set: { status: 'NOT_ALLOCATED' } },
+        {
+          $set: { status: 'NOT_ALLOCATED' },
+          $push: {
+            auditHistory: {
+              action: 'NOT_ALLOCATED',
+              status: 'NOT_ALLOCATED',
+              at: new Date(),
+              note: `Another committed Tier 1 vehicle was allocated to pool ${pool.poolCode}`,
+            },
+          },
+        },
         { session: session ?? undefined }
       );
     } else {
       await DriverSlotCommitment.updateMany(
         { slotId: slot._id, status: { $in: ['LOCKED', 'COMMITTED'] } },
-        { $set: { status: 'NOT_ALLOCATED' } },
+        {
+          $set: { status: 'NOT_ALLOCATED' },
+          $push: {
+            auditHistory: {
+              action: 'NOT_ALLOCATED',
+              status: 'NOT_ALLOCATED',
+              at: new Date(),
+              note: `Unselected for pool ${pool.poolCode}`,
+            },
+          },
+        },
         { session: session ?? undefined }
       );
     }

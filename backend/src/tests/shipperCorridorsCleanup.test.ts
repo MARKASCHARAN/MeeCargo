@@ -204,6 +204,9 @@ describe('MC-058: Shipper Scheduled Corridors & Live Pools Cleanup + Automated C
     // Automated sweep processes expired open pool and cancels empty expired slot
     const expiredSlotWithPool = { _id: new Types.ObjectId(), status: 'OPEN', cutoffAt: new Date(Date.now() - 1000) };
     const expiredEmptySlot = { _id: new Types.ObjectId(), status: 'OPEN', cutoffAt: new Date(Date.now() - 1000) };
+    vi.spyOn(Pool, 'find').mockReturnValueOnce({
+      select: vi.fn().mockResolvedValue([]),
+    } as never);
     vi.spyOn(Slot, 'find').mockReturnValueOnce({
       sort: vi.fn().mockResolvedValue([expiredSlotWithPool, expiredEmptySlot]),
     } as never);

@@ -37,6 +37,16 @@ export interface PoolLockedSnapshot {
   shipmentSnapshots: ShipmentLockedSnapshot[];
 }
 
+export interface PoolAllocationCandidateAudit {
+  vehicleId: Types.ObjectId;
+  driverUserId?: Types.ObjectId;
+  registrationNumber: string;
+  tier: 'TIER_1' | 'TIER_2' | 'TIER_3';
+  decision: 'ACCEPTED' | 'REJECTED';
+  reason: string;
+  at: Date;
+}
+
 export interface IPool extends Document {
   _id: Types.ObjectId;
   poolCode: string;
@@ -52,6 +62,7 @@ export interface IPool extends Document {
   viabilityStatus: 'PENDING' | 'PASSED' | 'FAILED';
   viabilityReason?: string;
   lockedSnapshot?: PoolLockedSnapshot;
+  allocationAudit?: PoolAllocationCandidateAudit[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -122,6 +133,23 @@ const poolSchema = new Schema<IPool>(
     },
     viabilityReason: { type: String, trim: true },
     lockedSnapshot: { type: poolLockedSnapshotSchema },
+    allocationAudit: {
+      type: [
+        new Schema(
+          {
+            vehicleId: { type: Schema.Types.ObjectId, ref: 'Vehicle', required: true },
+            driverUserId: { type: Schema.Types.ObjectId, ref: 'User' },
+            registrationNumber: { type: String, required: true },
+            tier: { type: String, enum: ['TIER_1', 'TIER_2', 'TIER_3'], required: true },
+            decision: { type: String, enum: ['ACCEPTED', 'REJECTED'], required: true },
+            reason: { type: String, required: true },
+            at: { type: Date, required: true, default: Date.now },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
   },
   { timestamps: true }
 );

@@ -1,6 +1,12 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-export type SlotStatus = 'OPEN' | 'LOCKING' | 'LOCKED' | 'COMPLETED' | 'CANCELLED';
+export type SlotStatus =
+  | 'SCHEDULED'
+  | 'OPEN'
+  | 'LOCKING'
+  | 'LOCKED'
+  | 'COMPLETED'
+  | 'CANCELLED';
 
 export interface SlotScheduleSnapshot {
   outboundPickupTime: string;
@@ -17,6 +23,8 @@ export interface ISlot extends Document {
   slotCode: string;
   label: string;
   departureDate: Date;
+  poolingOpensAt?: Date;
+  poolingOpenedAt?: Date;
   cutoffAt: Date;
   plannedDepartureAt: Date;
   estimatedArrivalStartAt: Date;
@@ -41,6 +49,8 @@ const slotSchema = new Schema<ISlot>(
     slotCode: { type: String, required: true, unique: true, uppercase: true, trim: true },
     label: { type: String, required: true, trim: true },
     departureDate: { type: Date, required: true },
+    poolingOpensAt: { type: Date },
+    poolingOpenedAt: { type: Date },
     cutoffAt: { type: Date, required: true },
     plannedDepartureAt: { type: Date, required: true },
     estimatedArrivalStartAt: { type: Date, required: true },
@@ -65,7 +75,7 @@ const slotSchema = new Schema<ISlot>(
     reservedVolumeCbm: { type: Number, default: 0, min: 0 },
     status: {
       type: String,
-      enum: ['OPEN', 'LOCKING', 'LOCKED', 'COMPLETED', 'CANCELLED'],
+      enum: ['SCHEDULED', 'OPEN', 'LOCKING', 'LOCKED', 'COMPLETED', 'CANCELLED'],
       default: 'OPEN',
     },
   },
@@ -74,5 +84,6 @@ const slotSchema = new Schema<ISlot>(
 
 slotSchema.index({ corridorId: 1, departureDate: 1, status: 1 });
 slotSchema.index({ cutoffAt: 1, status: 1 });
+slotSchema.index({ poolingOpensAt: 1, status: 1 });
 
 export const Slot = model<ISlot>('Slot', slotSchema);

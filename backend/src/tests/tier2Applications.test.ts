@@ -438,16 +438,16 @@ describe('MC-064: Public Tier 2 Driver Application Intake, Status Lookup & Secur
     vi.spyOn(fs, 'mkdir').mockResolvedValue(undefined);
     vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
 
-    vi.spyOn(User, 'create').mockResolvedValueOnce([
-      {
+    let createdUserDoc: Record<string, unknown> | null = null;
+    vi.spyOn(User, 'create').mockImplementationOnce((async (
+      docs: Array<Record<string, unknown>>
+    ) => {
+      createdUserDoc = {
         _id: userId,
-        name: validPublicPayload.fullName,
-        email: validPublicPayload.email,
-        phone: validPublicPayload.phone,
-        role: 'DRIVER',
-        isActive: true,
-      },
-    ] as never);
+        ...docs[0],
+      };
+      return [createdUserDoc];
+    }) as never);
 
     const profileSaveMock = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(DriverProfile, 'create').mockResolvedValueOnce([
@@ -498,6 +498,19 @@ describe('MC-064: Public Tier 2 Driver Application Intake, Status Lookup & Secur
     expect(res.body.accessToken).toBeTruthy();
     expect(appCreateSpy).toHaveBeenCalledOnce();
     expect(profileSaveMock).toHaveBeenCalledOnce();
+
+    // Verify the registered Tier 2 applicant can sign in cleanly via /api/v1/auth/login
+    vi.spyOn(User, 'findOne').mockReturnValueOnce({
+      select: vi.fn().mockResolvedValue(createdUserDoc),
+    } as never);
+    vi.spyOn(RefreshToken, 'create').mockResolvedValueOnce({} as never);
+    const loginRes = await request(app).post('/api/v1/auth/login').send({
+      email: '  RAMESH.T2@DRIVER.TEST ',
+      password: validPublicPayload.password,
+    });
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.success).toBe(true);
+    expect(loginRes.body.user.role).toBe('DRIVER');
   });
 
   it('looks up public application status safely without leaking sensitive identity/address PII', async () => {

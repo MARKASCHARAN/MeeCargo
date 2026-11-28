@@ -21,6 +21,8 @@ import {
   type DimensionUnit,
   type WeightUnit,
 } from './cargoCalculator.js';
+import { toCorridorDateKey } from './driverSlotService.js';
+import { assertCargoCompatibleWithPool } from './poolService.js';
 
 export const addressSchema = z.object({
   addressLine: z.string().trim().min(3, 'Address line is required').max(250),
@@ -103,11 +105,12 @@ export const createBookingSchema = z
     path: ['serviceDate'],
   });
 
-export function toServiceDateKey(date?: Date | string | null): string {
+export function toServiceDateKey(
+  date?: Date | string | null,
+  timeZone = 'Asia/Kolkata'
+): string {
   if (!date) return '';
-  const parsed = new Date(date);
-  if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toISOString().slice(0, 10);
+  return toCorridorDateKey(date, timeZone);
 }
 
 /**
@@ -121,10 +124,12 @@ export async function matchOperationalSlotForBooking(params: {
   chargeableWeightKg?: number;
   volumeCbm?: number;
   excludeSlotId?: Types.ObjectId;
+  timeZone?: string;
   now?: Date;
   session?: ClientSession | null;
 }): Promise<ISlot> {
   const now = params.now ?? new Date();
+  const timeZone = params.timeZone ?? 'Asia/Kolkata';
   const requiredWeight = params.chargeableWeightKg ?? 0;
   const requiredVolume = params.volumeCbm ?? 0;
 
@@ -139,7 +144,7 @@ export async function matchOperationalSlotForBooking(params: {
 
   const slotsOnDate = allSlots.filter(
     (s) =>
-      toServiceDateKey(s.departureDate) === params.serviceDate &&
+      toServiceDateKey(s.departureDate, timeZone) === params.serviceDate &&
       (!params.excludeSlotId || !s._id.equals(params.excludeSlotId))
   );
 
@@ -399,6 +404,11 @@ export async function createShipmentBooking(params: {
     weightUnit: input.cargo.weightUnit as WeightUnit,
   });
 
+  // Reject restricted cargo early before creating a PENDING_TOKEN booking
+  assertCargoCompatibleWithPool({
+    cargo: { handlingRestrictions: input.cargo.handlingRestrictions ?? [] },
+  } as IShipment);
+
   let slot: ISlot | null = null;
   if (input.slotId) {
     slot = await Slot.findById(input.slotId);
@@ -413,7 +423,10 @@ export async function createShipmentBooking(params: {
       );
     }
     if (now >= slot.cutoffAt) {
-      const dateLabel = toServiceDateKey(slot.departureDate || slot.plannedDepartureAt);
+      const dateLabel = toServiceDateKey(
+        slot.departureDate || slot.plannedDepartureAt,
+        corridor.timezone ?? 'Asia/Kolkata'
+      );
       throw new HttpError(
         409,
         `Booking cutoff has passed for ${
@@ -443,60 +456,80 @@ export async function createShipmentBooking(params: {
       serviceDate: input.serviceDate,
       chargeableWeightKg: cargoMetrics.chargeableWeightKg,
       volumeCbm: cargoMetrics.totalVolumeCbm,
+      timeZone: corridor.timezone ?? 'Asia/Kolkata',
       now,
     });
   } else {
     throw new HttpError(400, 'serviceDate is required for booking', 'VALIDATION_ERROR');
   }
 
-  const shipment = await Shipment.create({
-    reference: generateShipmentReference(now),
-    businessId: business._id,
-    createdByUserId: userId,
-    corridorId: corridor._id,
-    slotId: slot._id,
-    pickupStopCode: pickupStop.stopCode,
-    pickupStopOrder: pickupStop.sequenceOrder,
-    deliveryStopCode: deliveryStop.stopCode,
-    deliveryStopOrder: deliveryStop.sequenceOrder,
-    pickupAddress,
-    deliveryAddress: input.deliveryAddress,
-    recipientName: input.recipientName,
-    recipientPhone: input.recipientPhone,
-    cargo: {
-      category: cargoMetrics.category,
-      quantity: cargoMetrics.quantity,
-      unitDimensionsCm: cargoMetrics.unitDimensionsCm,
-      unitActualWeightKg: cargoMetrics.unitActualWeightKg,
-      totalActualWeightKg: cargoMetrics.totalActualWeightKg,
-      volumetricDivisor: cargoMetrics.volumetricDivisor,
-      volumetricWeightKg: cargoMetrics.totalVolumetricWeightKg,
-      chargeableWeightKg: cargoMetrics.chargeableWeightKg,
-      billingBasis: cargoMetrics.billingBasis,
-      volumeCbm: cargoMetrics.totalVolumeCbm,
-      stackable: input.cargo.stackable,
-      handlingRestrictions: input.cargo.handlingRestrictions,
-      declaredContents: input.cargo.declaredContents,
-      handlingNotes: input.cargo.handlingNotes,
-      irregularCargoNotes: input.cargo.irregularCargoNotes,
-    },
-    serviceType: input.serviceType ?? 'STANDARD_SCHEDULED_SHARED_POOL',
-    paymentChoice: (input.paymentChoice ?? 'TOKEN_PLUS_PICKUP_BALANCE') as PaymentChoice,
-    tokenStatus: 'PENDING',
-    status: 'PENDING_TOKEN',
-    ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
-    ...(input.externalOrderRef ? { externalOrderRef: input.externalOrderRef } : {}),
-    trackingToken: crypto.randomBytes(24).toString('hex'),
-    qrToken: crypto.randomBytes(16).toString('hex'),
-    statusHistory: [
-      {
-        status: 'PENDING_TOKEN',
-        at: now,
-        actorUserId: userId,
-        note: 'Booking created; awaiting refundable token confirmation',
+  let shipment: IShipment;
+  try {
+    shipment = await Shipment.create({
+      reference: generateShipmentReference(now),
+      businessId: business._id,
+      createdByUserId: userId,
+      corridorId: corridor._id,
+      slotId: slot._id,
+      pickupStopCode: pickupStop.stopCode,
+      pickupStopOrder: pickupStop.sequenceOrder,
+      deliveryStopCode: deliveryStop.stopCode,
+      deliveryStopOrder: deliveryStop.sequenceOrder,
+      pickupAddress,
+      deliveryAddress: input.deliveryAddress,
+      recipientName: input.recipientName,
+      recipientPhone: input.recipientPhone,
+      cargo: {
+        category: cargoMetrics.category,
+        quantity: cargoMetrics.quantity,
+        unitDimensionsCm: cargoMetrics.unitDimensionsCm,
+        unitActualWeightKg: cargoMetrics.unitActualWeightKg,
+        totalActualWeightKg: cargoMetrics.totalActualWeightKg,
+        volumetricDivisor: cargoMetrics.volumetricDivisor,
+        volumetricWeightKg: cargoMetrics.totalVolumetricWeightKg,
+        chargeableWeightKg: cargoMetrics.chargeableWeightKg,
+        billingBasis: cargoMetrics.billingBasis,
+        volumeCbm: cargoMetrics.totalVolumeCbm,
+        stackable: input.cargo.stackable,
+        handlingRestrictions: input.cargo.handlingRestrictions,
+        declaredContents: input.cargo.declaredContents,
+        handlingNotes: input.cargo.handlingNotes,
+        irregularCargoNotes: input.cargo.irregularCargoNotes,
       },
-    ],
-  });
+      serviceType: input.serviceType ?? 'STANDARD_SCHEDULED_SHARED_POOL',
+      paymentChoice: (input.paymentChoice ?? 'TOKEN_PLUS_PICKUP_BALANCE') as PaymentChoice,
+      tokenStatus: 'PENDING',
+      status: 'PENDING_TOKEN',
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+      ...(input.externalOrderRef ? { externalOrderRef: input.externalOrderRef } : {}),
+      trackingToken: crypto.randomBytes(24).toString('hex'),
+      qrToken: crypto.randomBytes(16).toString('hex'),
+      statusHistory: [
+        {
+          status: 'PENDING_TOKEN',
+          at: now,
+          actorUserId: userId,
+          note: 'Booking created; awaiting refundable token confirmation',
+        },
+      ],
+    });
+  } catch (err: unknown) {
+    const isDup =
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code?: number }).code === 11000;
+    if (isDup && input.idempotencyKey) {
+      const existing = await Shipment.findOne({
+        businessId: business._id,
+        idempotencyKey: input.idempotencyKey,
+      });
+      if (existing) {
+        return { shipment: existing, deduplicated: true };
+      }
+    }
+    throw err;
+  }
 
   return { shipment, deduplicated: false };
 }

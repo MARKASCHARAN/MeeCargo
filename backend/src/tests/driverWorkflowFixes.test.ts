@@ -221,6 +221,7 @@ describe('MC-051 to MC-057: Driver Workflow Integrity, Overlaps, Loading Plan, R
       return [createdTripDoc];
     }) as never);
     vi.spyOn(Shipment, 'updateMany').mockResolvedValueOnce({} as never);
+    vi.spyOn(Pool, 'updateOne').mockResolvedValueOnce({} as never);
     const updateOneSpy = vi.spyOn(DriverSlotCommitment, 'updateOne').mockResolvedValueOnce({} as never);
     const updateManySpy = vi.spyOn(DriverSlotCommitment, 'updateMany').mockResolvedValueOnce({} as never);
     vi.spyOn(NotificationLog, 'findOneAndUpdate').mockResolvedValueOnce({} as never);
@@ -243,7 +244,7 @@ describe('MC-051 to MC-057: Driver Workflow Integrity, Overlaps, Loading Plan, R
     );
     expect(updateManySpy).toHaveBeenCalledWith(
       expect.objectContaining({ slotId: slot1Id, _id: { $ne: commitment2Id } }),
-      { $set: { status: 'NOT_ALLOCATED' } },
+      expect.objectContaining({ $set: { status: 'NOT_ALLOCATED' } }),
       expect.anything()
     );
   });

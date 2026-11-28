@@ -32,7 +32,7 @@ export interface IPickupCollection extends Document {
 
 const pickupCollectionSchema = new Schema<IPickupCollection>(
   {
-    shipmentId: { type: Schema.Types.ObjectId, ref: 'Shipment', required: true, index: true },
+    shipmentId: { type: Schema.Types.ObjectId, ref: 'Shipment', required: true },
     tripId: { type: Schema.Types.ObjectId, ref: 'Trip', required: true, index: true },
     businessId: { type: Schema.Types.ObjectId, ref: 'BusinessProfile', required: true },
     collectedByDriverId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -69,6 +69,14 @@ pickupCollectionSchema.index(
   {
     unique: true,
     partialFilterExpression: { idempotencyKey: { $type: 'string' } },
+  }
+);
+pickupCollectionSchema.index(
+  { shipmentId: 1 },
+  {
+    name: 'uniq_collected_pickup_shipment',
+    unique: true,
+    partialFilterExpression: { collectionState: 'COLLECTED_BY_DRIVER' },
   }
 );
 

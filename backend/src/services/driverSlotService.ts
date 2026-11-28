@@ -45,6 +45,41 @@ export function resolveSlotTemplateForSlot(
   return corridor.slotSchedules[0] ?? null;
 }
 
+export function toCorridorDateKey(
+  date: Date | string,
+  timeZone = 'Asia/Kolkata'
+): string {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(d);
+    const y = parts.find((p) => p.type === 'year')?.value;
+    const m = parts.find((p) => p.type === 'month')?.value;
+    const day = parts.find((p) => p.type === 'day')?.value;
+    if (y && m && day) return `${y}-${m}-${day}`;
+  } catch {
+    // Fallback to ISO date key if invalid timezone string
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+export function isContractActiveOnServiceDate(
+  contract: { startDate: Date | string; endDate: Date | string },
+  serviceDate: Date | string,
+  timeZone = 'Asia/Kolkata'
+): boolean {
+  const targetKey = toCorridorDateKey(serviceDate, timeZone);
+  const startKey = toCorridorDateKey(contract.startDate, timeZone);
+  const endKey = toCorridorDateKey(contract.endDate, timeZone);
+  if (!targetKey || !startKey || !endKey) return false;
+  return targetKey >= startKey && targetKey <= endKey;
+}
+
 export function combineDateAndTime(baseDate: Date, timeHhMm: string): Date {
   const [h, m] = timeHhMm.split(':').map((n) => Number(n));
   const out = new Date(baseDate);
@@ -295,15 +330,30 @@ export async function notifyEligibleTier1DriversForSlot(params: {
   }
 
   const slotDate = new Date(slot.departureDate);
+  const slotDayStart = new Date(
+    Date.UTC(slotDate.getUTCFullYear(), slotDate.getUTCMonth(), slotDate.getUTCDate(), 0, 0, 0, 0)
+  );
+  const slotDayEnd = new Date(
+    Date.UTC(slotDate.getUTCFullYear(), slotDate.getUTCMonth(), slotDate.getUTCDate(), 23, 59, 59, 999)
+  );
   const contracts = await DriverContract.find({
     status: 'ACTIVE',
     eligibleCorridorIds: corridor._id,
-    startDate: { $lte: slotDate },
-    endDate: { $gte: slotDate },
+    startDate: { $lte: slotDayEnd },
+    endDate: { $gte: slotDayStart },
   });
 
   let notified = 0;
   for (const contract of contracts) {
+    if (
+      !isContractActiveOnServiceDate(
+        contract,
+        slotDate,
+        corridor.timezone ?? 'Asia/Kolkata'
+      )
+    ) {
+      continue;
+    }
     const profile = await DriverProfile.findOne({
       _id: contract.driverProfileId,
       fleetTier: 'TIER_1',
@@ -342,6 +392,67 @@ export async function notifyEligibleTier1DriversForSlot(params: {
   }
 
   return notified;
+}
+
+/**
+ * Scheduled job: opens SCHEDULED pooling windows once poolingOpensAt <= now
+ * and notifies all eligible active Tier 1 contract drivers idempotently,
+ * independent of whether any shipper booking has occurred yet.
+ */
+export async function processScheduledPoolingWindowOpenings(
+  now: Date = new Date()
+): Promise<{ openedCount: number; notificationsSent: number }> {
+  const candidates = await Slot.find({
+    cutoffAt: { $gt: now },
+    $or: [
+      { status: 'SCHEDULED', poolingOpensAt: { $lte: now } },
+      {
+        status: 'OPEN',
+        poolingOpenedAt: { $exists: false },
+        $or: [{ poolingOpensAt: { $exists: false } }, { poolingOpensAt: { $lte: now } }],
+      },
+    ],
+  }).sort({ plannedDepartureAt: 1 });
+
+  let openedCount = 0;
+  let notificationsSent = 0;
+  const corridorCache = new Map<string, ICorridor | null>();
+
+  for (const candidate of candidates) {
+    let slot = null;
+    if (candidate.status === 'SCHEDULED') {
+      slot = await Slot.findOneAndUpdate(
+        { _id: candidate._id, status: 'SCHEDULED', cutoffAt: { $gt: now } },
+        { $set: { status: 'OPEN', poolingOpenedAt: now } },
+        { returnDocument: 'after' }
+      );
+      if (slot) openedCount += 1;
+    } else {
+      slot = await Slot.findOneAndUpdate(
+        {
+          _id: candidate._id,
+          status: 'OPEN',
+          poolingOpenedAt: { $exists: false },
+          cutoffAt: { $gt: now },
+        },
+        { $set: { poolingOpenedAt: now } },
+        { returnDocument: 'after' }
+      );
+    }
+
+    if (!slot) continue;
+
+    const cKey = String(slot.corridorId);
+    if (!corridorCache.has(cKey)) {
+      corridorCache.set(cKey, await Corridor.findById(slot.corridorId));
+    }
+    const corridor = corridorCache.get(cKey);
+    if (!corridor || !corridor.isActive) continue;
+
+    notificationsSent += await notifyEligibleTier1DriversForSlot({ corridor, slot });
+  }
+
+  return { openedCount, notificationsSent };
 }
 
 /**
@@ -440,6 +551,10 @@ export async function listOpenPoolingSlotsForDriver(params: {
     corridorId: { $in: activeCorridors.map((c) => c._id) },
     status: 'OPEN',
     cutoffAt: { $gt: now },
+    $or: [
+      { poolingOpensAt: { $exists: false } },
+      { poolingOpensAt: { $lte: now } },
+    ],
   }).sort({ plannedDepartureAt: 1 });
 
   const openSlotIds = openSlots.map((s) => s._id);
@@ -658,6 +773,14 @@ export async function submitDriverSlotCommitment(params: {
       );
     }
 
+    if (slot.poolingOpensAt && now < new Date(slot.poolingOpensAt)) {
+      throw new HttpError(
+        409,
+        `Pooling window for ${slot.slotCode} has not opened yet.`,
+        'POOLING_WINDOW_NOT_OPEN'
+      );
+    }
+
     if (slot.status !== 'OPEN' || now >= slot.cutoffAt) {
       throw new HttpError(
         409,
@@ -706,18 +829,30 @@ export async function submitDriverSlotCommitment(params: {
     }
 
     const slotDate = new Date(slot.departureDate);
+    const slotDayStart = new Date(Date.UTC(slotDate.getUTCFullYear(), slotDate.getUTCMonth(), slotDate.getUTCDate(), 0, 0, 0, 0));
+    const slotDayEnd = new Date(Date.UTC(slotDate.getUTCFullYear(), slotDate.getUTCMonth(), slotDate.getUTCDate(), 23, 59, 59, 999));
     const activeContract = await DriverContract.findOne({
       driverUserId,
       status: 'ACTIVE',
       eligibleCorridorIds: corridor._id,
-      startDate: { $lte: slotDate },
-      endDate: { $gte: slotDate },
+      startDate: { $lte: slotDayEnd },
+      endDate: { $gte: slotDayStart },
     }).session(session);
 
-    if (!activeContract) {
+    if (
+      !activeContract ||
+      !isContractActiveOnServiceDate(
+        activeContract,
+        slotDate,
+        corridor.timezone ?? 'Asia/Kolkata'
+      )
+    ) {
       throw new HttpError(
         403,
-        `Your active contract does not include corridor ${corridor.code} on ${slotDate.toISOString().slice(0, 10)}.`,
+        `Your active contract does not include corridor ${corridor.code} on ${toCorridorDateKey(
+          slotDate,
+          corridor.timezone ?? 'Asia/Kolkata'
+        )}.`,
         'CONTRACT_CORRIDOR_INELIGIBLE'
       );
     }
@@ -770,7 +905,7 @@ export async function submitDriverSlotCommitment(params: {
 
     const checkConflicts = async () => {
       const existingOtherCommitments = await DriverSlotCommitment.find({
-        driverUserId,
+        $or: [{ driverUserId }, { vehicleId: vehicle._id }],
         status: { $in: ['COMMITTED', 'LOCKED', 'ALLOCATED'] },
         slotId: { $ne: slot._id },
       }).session(session);
@@ -785,7 +920,7 @@ export async function submitDriverSlotCommitment(params: {
       const otherCorridorMap = new Map(otherCorridors.map((c) => [String(c._id), c]));
 
       const activeTrips = await Trip.find({
-        driverId: profile.userId,
+        $or: [{ driverId: profile.userId }, { vehicleId: vehicle._id }],
         status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'IN_PROGRESS', 'PAUSED'] },
       })
         .select('_id tripCode plannedDepartureAt estimatedEndAt')
@@ -820,7 +955,29 @@ export async function submitDriverSlotCommitment(params: {
 
     await checkConflicts();
 
+    const priorCommitment = await DriverSlotCommitment.findOne({
+      slotId: slot._id,
+      driverUserId: profile.userId,
+    }).session(session);
+    if (priorCommitment && ['LOCKED', 'ALLOCATED'].includes(priorCommitment.status)) {
+      throw new HttpError(
+        409,
+        `Commitment is already ${priorCommitment.status} and cannot be modified.`,
+        'COMMITMENT_LOCKED'
+      );
+    }
+
     const pool = await Pool.findOne({ slotId: slot._id }).session(session);
+    const isUpdate = Boolean(priorCommitment && priorCommitment.status === 'COMMITTED');
+    const auditEntry = {
+      action: (isUpdate ? 'UPDATED' : 'SUBMITTED') as 'SUBMITTED' | 'UPDATED',
+      status: 'COMMITTED' as const,
+      actorUserId: profile.userId,
+      at: now,
+      note: isUpdate
+        ? `Updated commitment to pickup ${pickupTime}, return ${finalReturnTime}`
+        : `Submitted availability for Slot ${slotNum} (pickup ${pickupTime}, return ${finalReturnTime})`,
+    };
 
     const commitment = await DriverSlotCommitment.findOneAndUpdate(
       { slotId: slot._id, driverUserId: profile.userId },
@@ -839,6 +996,7 @@ export async function submitDriverSlotCommitment(params: {
           status: 'COMMITTED',
           committedAt: now,
         },
+        $push: { auditHistory: auditEntry },
         $unset: {
           withdrawnAt: '',
           invalidationReason: '',
@@ -869,6 +1027,14 @@ export async function withdrawDriverSlotCommitment(params: {
     if (!slot) {
       throw new HttpError(404, 'Pooling slot not found', 'SLOT_NOT_FOUND');
     }
+    if (slot.poolingOpensAt && now < new Date(slot.poolingOpensAt)) {
+      throw new HttpError(
+        409,
+        `Pooling window for ${slot.slotCode} has not opened yet.`,
+        'POOLING_WINDOW_NOT_OPEN'
+      );
+    }
+
     if (slot.status !== 'OPEN' || now >= slot.cutoffAt) {
       throw new HttpError(
         409,
@@ -884,9 +1050,26 @@ export async function withdrawDriverSlotCommitment(params: {
     if (!commitment || commitment.status === 'WITHDRAWN') {
       throw new HttpError(404, 'No active slot commitment found to withdraw.', 'NOT_FOUND');
     }
+    if (commitment.status === 'LOCKED' || commitment.status === 'ALLOCATED') {
+      throw new HttpError(
+        409,
+        `Commitment is already ${commitment.status} and cannot be withdrawn.`,
+        'COMMITMENT_LOCKED'
+      );
+    }
 
     commitment.status = 'WITHDRAWN';
     commitment.withdrawnAt = now;
+    if (!Array.isArray(commitment.auditHistory)) {
+      commitment.auditHistory = [];
+    }
+    commitment.auditHistory.push({
+      action: 'WITHDRAWN',
+      status: 'WITHDRAWN',
+      actorUserId: commitment.driverUserId,
+      at: now,
+      note: `Driver withdrew availability prior to cutoff for ${slot.slotCode}`,
+    });
     await commitment.save({ session: session ?? undefined });
 
     return { commitment };
@@ -951,17 +1134,31 @@ export async function validateCommitmentsAtWindowClose(params: {
     }
 
     const slotDate = new Date(slot.departureDate);
+    const slotDayStart = new Date(
+      Date.UTC(slotDate.getUTCFullYear(), slotDate.getUTCMonth(), slotDate.getUTCDate(), 0, 0, 0, 0)
+    );
+    const slotDayEnd = new Date(
+      Date.UTC(slotDate.getUTCFullYear(), slotDate.getUTCMonth(), slotDate.getUTCDate(), 23, 59, 59, 999)
+    );
     const activeContract = !reason
       ? await DriverContract.findOne({
           driverUserId: commitment.driverUserId,
           status: 'ACTIVE',
           eligibleCorridorIds: corridor._id,
-          startDate: { $lte: slotDate },
-          endDate: { $gte: slotDate },
+          startDate: { $lte: slotDayEnd },
+          endDate: { $gte: slotDayStart },
         }).session(session)
       : null;
 
-    if (!reason && !activeContract) {
+    if (
+      !reason &&
+      (!activeContract ||
+        !isContractActiveOnServiceDate(
+          activeContract,
+          slotDate,
+          corridor.timezone ?? 'Asia/Kolkata'
+        ))
+    ) {
       reason = 'CONTRACT_INELIGIBLE_FOR_CORRIDOR';
     }
 
@@ -989,12 +1186,26 @@ export async function validateCommitmentsAtWindowClose(params: {
     if (reason) {
       commitment.status = 'INVALIDATED';
       commitment.invalidationReason = reason;
+      if (!Array.isArray(commitment.auditHistory)) commitment.auditHistory = [];
+      commitment.auditHistory.push({
+        action: 'INVALIDATED',
+        status: 'INVALIDATED',
+        at: new Date(),
+        note: reason,
+      });
       await commitment.save({ session: session ?? undefined });
       invalidatedCount += 1;
     } else {
       commitment.status = 'LOCKED';
       commitment.lockedAt = commitment.lockedAt ?? new Date();
       commitment.invalidationReason = undefined;
+      if (!Array.isArray(commitment.auditHistory)) commitment.auditHistory = [];
+      commitment.auditHistory.push({
+        action: 'LOCKED',
+        status: 'LOCKED',
+        at: new Date(),
+        note: `Locked at pooling window cutoff for ${slot.slotCode}`,
+      });
       await commitment.save({ session: session ?? undefined });
       validCommitments.push(commitment);
     }

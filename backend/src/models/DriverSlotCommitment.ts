@@ -6,8 +6,27 @@ export type DriverSlotCommitmentStatus =
   | 'WITHDRAWN'
   | 'ALLOCATED'
   | 'NOT_ALLOCATED'
+  | 'ROLLED_OVER'
+  | 'CANCELLED'
   | 'EXPIRED'
   | 'INVALIDATED';
+
+export interface DriverCommitmentAuditEntry {
+  action:
+    | 'SUBMITTED'
+    | 'UPDATED'
+    | 'WITHDRAWN'
+    | 'LOCKED'
+    | 'ALLOCATED'
+    | 'NOT_ALLOCATED'
+    | 'ROLLED_OVER'
+    | 'CANCELLED'
+    | 'INVALIDATED';
+  status: DriverSlotCommitmentStatus;
+  actorUserId?: Types.ObjectId;
+  at: Date;
+  note?: string;
+}
 
 export interface IDriverSlotCommitment extends Document {
   corridorId: Types.ObjectId;
@@ -22,6 +41,7 @@ export interface IDriverSlotCommitment extends Document {
   selectedReturnTime: string;
   status: DriverSlotCommitmentStatus;
   invalidationReason?: string;
+  auditHistory?: DriverCommitmentAuditEntry[];
   committedAt: Date;
   lockedAt?: Date;
   withdrawnAt?: Date;
@@ -86,7 +106,17 @@ const driverSlotCommitmentSchema = new Schema<IDriverSlotCommitment>(
     },
     status: {
       type: String,
-      enum: ['COMMITTED', 'LOCKED', 'WITHDRAWN', 'ALLOCATED', 'NOT_ALLOCATED', 'EXPIRED', 'INVALIDATED'],
+      enum: [
+        'COMMITTED',
+        'LOCKED',
+        'WITHDRAWN',
+        'ALLOCATED',
+        'NOT_ALLOCATED',
+        'ROLLED_OVER',
+        'CANCELLED',
+        'EXPIRED',
+        'INVALIDATED',
+      ],
       default: 'COMMITTED',
       required: true,
       index: true,
@@ -94,6 +124,21 @@ const driverSlotCommitmentSchema = new Schema<IDriverSlotCommitment>(
     invalidationReason: {
       type: String,
       trim: true,
+    },
+    auditHistory: {
+      type: [
+        new Schema(
+          {
+            action: { type: String, required: true },
+            status: { type: String, required: true },
+            actorUserId: { type: Schema.Types.ObjectId, ref: 'User' },
+            at: { type: Date, required: true, default: Date.now },
+            note: { type: String, trim: true },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
     },
     committedAt: {
       type: Date,

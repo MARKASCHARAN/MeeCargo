@@ -16,7 +16,7 @@ const envSchema = z.object({
   ROUTING_PROVIDER: z.enum(['FIXTURE', 'OSRM']).default('FIXTURE'),
   OSRM_BASE_URL: z.string().url().default('https://router.project-osrm.org'),
   OPTIMIZER_URL: z.string().url().default('http://localhost:8000'),
-  OPTIMIZER_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(5000),
+  OPTIMIZER_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(10000),
   GEOCODING_PROVIDER: z.enum(['FIXTURE', 'NOMINATIM']).default('FIXTURE'),
   NOTIFICATION_PROVIDER: z.enum(['CONSOLE', 'WEBHOOK']).default('CONSOLE'),
   PLATFORM_OWNER_EMAIL: z.preprocess(
