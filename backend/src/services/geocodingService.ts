@@ -78,6 +78,61 @@ const GUJARAT_FIXTURE_PLACES: FixturePlace[] = [
     coordinates: [72.3627, 22.8347],
     label: 'Bavla, Ahmedabad District, Gujarat',
   },
+  // Andhra Pradesh Rural & Semi-Urban Corridors
+  {
+    keywords: ['tadepalligudem', 'pentapadu', 'unguturu', 'west godavari'],
+    pincodes: ['534101', '534102', '534166', '534111'],
+    coordinates: [81.527, 16.8147],
+    label: 'Tadepalligudem Rural Agro Hub, West Godavari, Andhra Pradesh',
+  },
+  {
+    keywords: ['nuzvid', 'agripalli', 'chatrai', 'eluru'],
+    pincodes: ['521201', '521211', '534001', '534002'],
+    coordinates: [80.8465, 16.7885],
+    label: 'Nuzvid Mango & Agro Belt, Eluru District, Andhra Pradesh',
+  },
+  {
+    keywords: ['gudivada', 'pamarru', 'vuyyuru', 'krishna'],
+    pincodes: ['521301', '521157', '521165'],
+    coordinates: [80.9926, 16.4355],
+    label: 'Gudivada Rice Mill Cluster, Krishna District, Andhra Pradesh',
+  },
+  {
+    keywords: ['vijayawada', 'gollapudi', 'ibrahimpatnam', 'ntr', 'nunna'],
+    pincodes: ['521225', '520001', '520012', '521212'],
+    coordinates: [80.5847, 16.5449],
+    label: 'Vijayawada Gollapudi Wholesale Mandi, NTR District, Andhra Pradesh',
+  },
+  {
+    keywords: ['madanapalle', 'kalikiri', 'vayalpad', 'annamayya'],
+    pincodes: ['517325', '517234', '517299'],
+    coordinates: [78.5029, 13.5503],
+    label: 'Madanapalle Tomato & Dairy Rural Hub, Annamayya District, Andhra Pradesh',
+  },
+  {
+    keywords: ['pileru', 'piler', 'kalakada', 'chittoor'],
+    pincodes: ['517214', '517236', '517001'],
+    coordinates: [78.9437, 13.6556],
+    label: 'Pileru Rural Groundnut & Jaggery Yard, Annamayya District, Andhra Pradesh',
+  },
+  {
+    keywords: ['tirupati', 'renigunta', 'chandragiri', 'puttur'],
+    pincodes: ['517520', '517501', '517101', '517583'],
+    coordinates: [79.5113, 13.65],
+    label: 'Tirupati Renigunta Wholesale Hub, Tirupati District, Andhra Pradesh',
+  },
+  {
+    keywords: ['nellore', 'gudur', 'kovur', 'naidupeta'],
+    pincodes: ['524001', '524101', '524137', '524126'],
+    coordinates: [79.9865, 14.4426],
+    label: 'Nellore Grain & Aqua Feed Hub, SPSR Nellore District, Andhra Pradesh',
+  },
+  {
+    keywords: ['guntur', 'tenali', 'narasaraopet'],
+    pincodes: ['522001', '522201', '522601'],
+    coordinates: [80.4365, 16.3067],
+    label: 'Guntur Chilli & Agri Market, Andhra Pradesh',
+  },
 ];
 
 function lookupFixture(req: GeocodeRequest): GeocodeResult {

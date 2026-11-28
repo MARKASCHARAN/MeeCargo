@@ -23,23 +23,23 @@ export function ExpressBookingPage() {
   const [serviceType, setServiceType] = useState<'EXPRESS_MARKETPLACE' | 'NEW_ROUTE_MARKETPLACE'>(
     'EXPRESS_MARKETPLACE'
   );
-  const [pickupAddressLine, setPickupAddressLine] = useState('Plot 45, GIDC Makarpura');
-  const [pickupTown, setPickupTown] = useState('Vadodara');
-  const [pickupDistrict, setPickupDistrict] = useState('Vadodara');
-  const [pickupPincode, setPickupPincode] = useState('390010');
-  const [pickupLng, setPickupLng] = useState(73.1812);
-  const [pickupLat, setPickupLat] = useState(22.2587);
-  const [pickupContactName, setPickupContactName] = useState('Warehouse Supervisor');
-  const [pickupContactPhone, setPickupContactPhone] = useState('+919825001100');
+  const [pickupAddressLine, setPickupAddressLine] = useState('Plot 18, Rural Rice Mill Road');
+  const [pickupTown, setPickupTown] = useState('Tadepalligudem');
+  const [pickupDistrict, setPickupDistrict] = useState('West Godavari');
+  const [pickupPincode, setPickupPincode] = useState('534101');
+  const [pickupLng, setPickupLng] = useState(81.527);
+  const [pickupLat, setPickupLat] = useState(16.8147);
+  const [pickupContactName, setPickupContactName] = useState('Godavari Agro Manager');
+  const [pickupContactPhone, setPickupContactPhone] = useState('+919848001100');
 
-  const [deliveryAddressLine, setDeliveryAddressLine] = useState('Gate 7, Sarkhej Freight Yard');
-  const [deliveryTown, setDeliveryTown] = useState('Ahmedabad');
-  const [deliveryDistrict, setDeliveryDistrict] = useState('Ahmedabad');
-  const [deliveryPincode, setDeliveryPincode] = useState('382210');
-  const [deliveryLng, setDeliveryLng] = useState(72.4986);
-  const [deliveryLat, setDeliveryLat] = useState(22.9734);
-  const [recipientName, setRecipientName] = useState('Patel Distributors');
-  const [recipientPhone, setRecipientPhone] = useState('+919825002299');
+  const [deliveryAddressLine, setDeliveryAddressLine] = useState('Shop 12, Gollapudi Agricultural Yard');
+  const [deliveryTown, setDeliveryTown] = useState('Vijayawada');
+  const [deliveryDistrict, setDeliveryDistrict] = useState('NTR');
+  const [deliveryPincode, setDeliveryPincode] = useState('521225');
+  const [deliveryLng, setDeliveryLng] = useState(80.5847);
+  const [deliveryLat, setDeliveryLat] = useState(16.5449);
+  const [recipientName, setRecipientName] = useState('Krishna Produce Wholesale');
+  const [recipientPhone, setRecipientPhone] = useState('+919848002299');
 
   const [category, setCategory] = useState<CargoCategory>('STANDARD_BOX');
   const [quantity, setQuantity] = useState(4);

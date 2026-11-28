@@ -24,6 +24,7 @@ import {
   verifyTier2DriverEligibility,
 } from '../services/hybridOrchestratorService.js';
 import { optimizeAndPlanTripRoute } from '../services/routePlanningService.js';
+import * as optimizerClient from '../services/optimizerClient.js';
 import {
   calculateDeterministicTier2Payout,
   calculateExpressCustomerQuotePaise,
@@ -506,6 +507,17 @@ describe('MC-071 to MC-080: Tier 2 Open Marketplace, Hybrid Orchestrator & Settl
       lean: vi.fn().mockResolvedValue(null),
     } as never);
     vi.spyOn(RouteMatrixCache, 'findOneAndUpdate').mockResolvedValueOnce(null as never);
+    vi.spyOn(optimizerClient, 'callRouteOptimizer').mockResolvedValueOnce({
+      status: 'OPTIMAL',
+      vehicle_id: 'GJ06T20001',
+      ordered_stops: [
+        { sequence: 0, stop_index: 0, stop_code: 'EXP-PKP', name: 'Vadodara Pickup', arrival_min: 0, cumulative_distance_meters: 0, shipment_ids: [] },
+        { sequence: 1, stop_index: 1, stop_code: 'EXP-DRP', name: 'Ahmedabad Drop', arrival_min: 140, cumulative_distance_meters: 112000, shipment_ids: [String(shipmentId)] },
+      ],
+      assigned_shipments: [String(shipmentId)],
+      total_distance_meters: 112000,
+      estimated_duration_seconds: 8400,
+    });
 
     const planResult = await optimizeAndPlanTripRoute({ tripId: String(tripId) });
     expect(planResult.routePlan.orderedStops.length).toBeGreaterThanOrEqual(2);

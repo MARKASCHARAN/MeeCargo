@@ -90,13 +90,13 @@ export function BookShipmentPage() {
   const [recipientName, setRecipientName] = useState('');
   const [recipientPhone, setRecipientPhone] = useState('');
   const [deliveryAddressLine, setDeliveryAddressLine] = useState('');
-  const [deliveryVillageOrTown, setDeliveryVillageOrTown] = useState('Anand');
-  const [deliveryDistrict, setDeliveryDistrict] = useState('Anand');
-  const [deliveryState, setDeliveryState] = useState('Gujarat');
-  const [deliveryPincode, setDeliveryPincode] = useState('388001');
+  const [deliveryVillageOrTown, setDeliveryVillageOrTown] = useState('Nuzvid');
+  const [deliveryDistrict, setDeliveryDistrict] = useState('Eluru');
+  const [deliveryState, setDeliveryState] = useState('Andhra Pradesh');
+  const [deliveryPincode, setDeliveryPincode] = useState('521201');
   const [deliveryLandmark, setDeliveryLandmark] = useState('');
   const [deliveryCoords, setDeliveryCoords] = useState<[number, number]>([
-    72.9289, 22.5645,
+    80.8465, 16.7885,
   ]);
 
   const [category, setCategory] = useState<CargoCategory>('STANDARD_BOX');
