@@ -73,14 +73,14 @@ export function TruckBedVisualizer({
   const capacityIssues = loadingPlan.capacityIssues ?? [];
 
   return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+    <div className="space-y-3 rounded-[22px] border border-[#dce5fa] bg-[#fcfdff] p-4 shadow-2xs">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-xs font-bold uppercase tracking-wide text-slate-900">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-[#080e2b]">
             2D Truck Bed Loading Plan ({dims.length} × {dims.width} × {dims.height} cm
             {vehicleLabel ? ` • ${vehicleLabel}` : ''})
           </h3>
-          <p className="text-[11px] text-slate-500">
+          <p className="mt-0.5 text-[11px] text-[#5c6b94]">
             LIFO Order: Load farthest drop (#1) at Cab Bulkhead first → nearest drop at Tailgate last
             (unloads first)
           </p>
