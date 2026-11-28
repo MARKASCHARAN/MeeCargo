@@ -23,6 +23,18 @@ import {
   listTier2ApplicationsForOwner,
   rejectTier2Application,
 } from '../services/tier2ApplicationService.js';
+import {
+  evaluatePoolForMarketplaceOpportunities,
+  handleTier2CancellationOrBreakdownReassignment,
+  listMarketplaceOpportunitiesForOwner,
+} from '../services/hybridOrchestratorService.js';
+import {
+  getActiveMarketplacePolicy,
+  holdOrReverseTier2Earning,
+  listOwnerTier2Earnings,
+  settleTier2Earning,
+  updateMarketplacePolicyForOwner,
+} from '../services/tier2PayoutService.js';
 import { HttpError } from '../utils/errors.js';
 
 const router = Router();
@@ -659,6 +671,124 @@ router.post('/tier2-applications/:applicationId/reject', async (req, res) => {
   res.json({
     success: true,
     ...result,
+  });
+});
+
+router.get('/marketplace-policy', async (_req, res) => {
+  const policy = await getActiveMarketplacePolicy();
+  res.json({
+    success: true,
+    policy,
+  });
+});
+
+router.put('/marketplace-policy', async (req, res) => {
+  const policy = await updateMarketplacePolicyForOwner(req.body ?? {});
+  res.json({
+    success: true,
+    policy,
+  });
+});
+
+router.get('/marketplace-opportunities', async (req, res) => {
+  const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : undefined;
+  const opportunityType =
+    typeof req.query.opportunityType === 'string'
+      ? req.query.opportunityType.toUpperCase()
+      : undefined;
+  const opportunities = await listMarketplaceOpportunitiesForOwner({
+    status: status as never,
+    opportunityType: opportunityType as never,
+  });
+  res.json({
+    success: true,
+    opportunities,
+  });
+});
+
+router.post('/marketplace-opportunities/:opportunityId/reassign', async (req, res) => {
+  const opportunityId = Array.isArray(req.params.opportunityId)
+    ? req.params.opportunityId[0]
+    : req.params.opportunityId;
+  const reason =
+    typeof req.body?.reason === 'string' && req.body.reason.trim().length >= 3
+      ? req.body.reason.trim()
+      : 'Platform Owner triggered marketplace reassignment';
+  const result = await handleTier2CancellationOrBreakdownReassignment({
+    opportunityId,
+    reason,
+    actorUserId: req.auth!.userId,
+  });
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.post('/marketplace/evaluate-pool/:poolId', async (req, res) => {
+  const poolId = Array.isArray(req.params.poolId) ? req.params.poolId[0] : req.params.poolId;
+  const triggerType = req.body?.triggerType === 'RIGHT_SIZING' ? 'RIGHT_SIZING' : 'OVERFLOW';
+  const result = await evaluatePoolForMarketplaceOpportunities({
+    poolId,
+    actorUserId: req.auth!.userId,
+    triggerType,
+  });
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.get('/tier2-earnings', async (req, res) => {
+  const status = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : undefined;
+  const result = await listOwnerTier2Earnings({
+    status: status as never,
+  });
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.post('/tier2-earnings/:earningId/settle', async (req, res) => {
+  const earningId = Array.isArray(req.params.earningId)
+    ? req.params.earningId[0]
+    : req.params.earningId;
+  const earning = await settleTier2Earning({
+    earningId,
+    actorUserId: req.auth!.userId,
+    idempotencyKey:
+      typeof req.body?.idempotencyKey === 'string' ? req.body.idempotencyKey : undefined,
+    adjustmentsPaise:
+      typeof req.body?.adjustmentsPaise === 'number' ? req.body.adjustmentsPaise : undefined,
+    note: typeof req.body?.note === 'string' ? req.body.note : undefined,
+  });
+  res.json({
+    success: true,
+    earning,
+  });
+});
+
+router.post('/tier2-earnings/:earningId/action', async (req, res) => {
+  const earningId = Array.isArray(req.params.earningId)
+    ? req.params.earningId[0]
+    : req.params.earningId;
+  const schema = z.object({
+    action: z.enum(['HOLD', 'DISPUTE', 'REVERSE']),
+    reason: z.string().trim().min(3).max(400),
+  });
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    throw new HttpError(400, 'Valid action and reason required', 'VALIDATION_ERROR');
+  }
+  const earning = await holdOrReverseTier2Earning({
+    earningId,
+    action: parsed.data.action,
+    reason: parsed.data.reason,
+  });
+  res.json({
+    success: true,
+    earning,
   });
 });
 

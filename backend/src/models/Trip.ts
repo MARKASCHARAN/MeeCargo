@@ -164,9 +164,10 @@ export interface ITrip extends Document {
   _id: Types.ObjectId;
   tripCode: string;
   poolId?: Types.ObjectId;
-  corridorId: Types.ObjectId;
-  slotId: Types.ObjectId;
+  corridorId?: Types.ObjectId;
+  slotId?: Types.ObjectId;
   sourceCommitmentId?: Types.ObjectId;
+  marketplaceOpportunityId?: Types.ObjectId;
   vehicleId: Types.ObjectId;
   driverId: Types.ObjectId;
   shipmentIds: Types.ObjectId[];
@@ -225,13 +226,17 @@ const tripSchema = new Schema<ITrip>(
   {
     tripCode: { type: String, required: true, unique: true, uppercase: true, trim: true },
     poolId: { type: Schema.Types.ObjectId, ref: 'Pool', unique: true, sparse: true },
-    corridorId: { type: Schema.Types.ObjectId, ref: 'Corridor', required: true },
-    slotId: { type: Schema.Types.ObjectId, ref: 'Slot', required: true },
+    corridorId: { type: Schema.Types.ObjectId, ref: 'Corridor' },
+    slotId: { type: Schema.Types.ObjectId, ref: 'Slot' },
     sourceCommitmentId: {
       type: Schema.Types.ObjectId,
       ref: 'DriverSlotCommitment',
       unique: true,
       sparse: true,
+    },
+    marketplaceOpportunityId: {
+      type: Schema.Types.ObjectId,
+      ref: 'MarketplaceOpportunity',
     },
     vehicleId: { type: Schema.Types.ObjectId, ref: 'Vehicle', required: true },
     driverId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -350,5 +355,16 @@ const tripSchema = new Schema<ITrip>(
 
 tripSchema.index({ driverId: 1, status: 1, plannedDepartureAt: 1 });
 tripSchema.index({ vehicleId: 1, status: 1, plannedDepartureAt: 1 });
+tripSchema.index(
+  { marketplaceOpportunityId: 1 },
+  {
+    name: 'uniq_active_trip_per_marketplace_opp',
+    unique: true,
+    partialFilterExpression: {
+      marketplaceOpportunityId: { $type: 'objectId' },
+      status: { $in: ['ASSIGNED', 'DRIVER_ACCEPTED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED'] },
+    },
+  }
+);
 
 export const Trip = model<ITrip>('Trip', tripSchema);

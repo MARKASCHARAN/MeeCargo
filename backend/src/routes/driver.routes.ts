@@ -42,6 +42,15 @@ import {
   submitOrResubmitTier2Application,
   tier2ApplicationSubmissionSchema,
 } from '../services/tier2ApplicationService.js';
+import { MarketplaceOpportunity } from '../models/MarketplaceOpportunity.js';
+import {
+  acceptMarketplaceOpportunityAtomic,
+  declineMarketplaceOffer,
+  handleTier2CancellationOrBreakdownReassignment,
+  listEligibleOpportunitiesForDriver,
+  viewMarketplaceOffer,
+} from '../services/hybridOrchestratorService.js';
+import { listDriverTier2Earnings } from '../services/tier2PayoutService.js';
 import { HttpError } from '../utils/errors.js';
 
 const ALLOWED_UPLOAD_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -145,20 +154,105 @@ router.post('/tier2-application', async (req, res) => {
 });
 
 router.get('/marketplace-opportunities', async (req, res) => {
-  const result = await listMarketplaceOpportunitiesForTier2(req.auth!.userId);
+  await assertApprovedTier2Driver(req.auth!.userId);
+  const [hybridRes, legacyRes] = await Promise.all([
+    listEligibleOpportunitiesForDriver(req.auth!.userId),
+    listMarketplaceOpportunitiesForTier2(req.auth!.userId),
+  ]);
+  res.json({
+    success: true,
+    eligible: hybridRes.eligible,
+    ineligibilityReason: hybridRes.ineligibilityReason,
+    marketplaceOpportunities: hybridRes.opportunities,
+    opportunities: legacyRes.opportunities,
+    vehicle: legacyRes.vehicle,
+  });
+});
+
+router.post('/marketplace-opportunities/:opportunityId/view', async (req, res) => {
+  const opportunityId = Array.isArray(req.params.opportunityId)
+    ? req.params.opportunityId[0]
+    : req.params.opportunityId;
+  const opportunity = await viewMarketplaceOffer({
+    opportunityId,
+    driverUserId: req.auth!.userId,
+  });
+  res.json({
+    success: true,
+    opportunity,
+  });
+});
+
+router.post('/marketplace-opportunities/:opportunityId/accept', async (req, res) => {
+  const targetId = Array.isArray(req.params.opportunityId)
+    ? req.params.opportunityId[0]
+    : req.params.opportunityId;
+
+  const isMarketplaceOpp = isValidObjectId(targetId)
+    ? await MarketplaceOpportunity.exists({ _id: targetId })
+    : null;
+
+  if (isMarketplaceOpp) {
+    const result = await acceptMarketplaceOpportunityAtomic({
+      opportunityId: targetId,
+      driverUserId: req.auth!.userId,
+    });
+    res.json({
+      success: true,
+      ...result,
+    });
+    return;
+  }
+
+  const result = await acceptMarketplaceOpportunity({
+    driverUserId: req.auth!.userId,
+    tripId: targetId,
+  });
   res.json({
     success: true,
     ...result,
   });
 });
 
-router.post('/marketplace-opportunities/:tripId/accept', async (req, res) => {
-  const tripId = Array.isArray(req.params.tripId)
-    ? req.params.tripId[0]
-    : req.params.tripId;
-  const result = await acceptMarketplaceOpportunity({
+router.post('/marketplace-opportunities/:opportunityId/decline', async (req, res) => {
+  const opportunityId = Array.isArray(req.params.opportunityId)
+    ? req.params.opportunityId[0]
+    : req.params.opportunityId;
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+  const result = await declineMarketplaceOffer({
+    opportunityId,
     driverUserId: req.auth!.userId,
-    tripId,
+    reason,
+  });
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.get('/marketplace-earnings', async (req, res) => {
+  await assertApprovedTier2Driver(req.auth!.userId);
+  const result = await listDriverTier2Earnings(req.auth!.userId);
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.post('/trips/:tripId/release-reassignment', async (req, res) => {
+  const tripId = Array.isArray(req.params.tripId) ? req.params.tripId[0] : req.params.tripId;
+  const reason =
+    typeof req.body?.reason === 'string' && req.body.reason.trim().length >= 3
+      ? req.body.reason.trim()
+      : 'Tier 2 driver released trip for marketplace reassignment';
+  const trip = await Trip.findOne({ _id: tripId, driverId: req.auth!.userId });
+  if (!trip) {
+    throw new HttpError(403, 'Trip not found or not assigned to you', 'FORBIDDEN');
+  }
+  const result = await handleTier2CancellationOrBreakdownReassignment({
+    tripId: String(trip._id),
+    reason,
+    actorUserId: req.auth!.userId,
   });
   res.json({
     success: true,

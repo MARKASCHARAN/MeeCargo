@@ -37,6 +37,11 @@ import {
 } from '../services/shipmentService.js';
 import { serializeCsv } from '../utils/csv.js';
 import { HttpError } from '../utils/errors.js';
+import {
+  createExpressOrNewRouteBooking,
+  evaluateNewRouteBatching,
+  quoteExpressOrNewRouteBooking,
+} from '../services/hybridOrchestratorService.js';
 
 const router = Router();
 
@@ -617,6 +622,37 @@ router.post('/exceptions/:exceptionId/resolve', requireBusinessProfile, async (r
   res.json({
     success: true,
     ...result,
+  });
+});
+
+router.post('/marketplace/quote', requireAuth, async (req, res) => {
+  const quote = await quoteExpressOrNewRouteBooking(req.body);
+  res.json({
+    success: true,
+    quote,
+  });
+});
+
+router.post('/marketplace/bookings', requireBusinessProfile, async (req, res) => {
+  const result = await createExpressOrNewRouteBooking({
+    businessId: req.businessProfile!._id,
+    userId: req.auth!.userId,
+    rawInput: req.body,
+  });
+  res.status(201).json({
+    success: true,
+    ...result,
+  });
+});
+
+router.post('/marketplace/new-route/evaluate', requireAuth, async (req, res) => {
+  const evaluation = await evaluateNewRouteBatching({
+    newShipmentId: typeof req.body?.shipmentId === 'string' ? req.body.shipmentId : undefined,
+    actorUserId: req.auth!.userId,
+  });
+  res.json({
+    success: true,
+    evaluation,
   });
 });
 
