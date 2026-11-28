@@ -12,6 +12,7 @@ import shipperBusinessRoutes from './routes/shipperBusiness.routes.js';
 import shipmentRoutes from './routes/shipment.routes.js';
 import driverRoutes from './routes/driver.routes.js';
 import platformOwnerRoutes from './routes/platformOwner.routes.js';
+import publicTier2Routes from './routes/publicTier2.routes.js';
 import { HttpError } from './utils/errors.js';
 import { logger } from './utils/logger.js';
 
@@ -54,6 +55,7 @@ export function createApp() {
   app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/corridors', corridorRoutes);
   app.use('/api/v1/pools', poolRoutes);
+  app.use('/api/v1/public/tier2', publicTier2Routes);
   app.use('/api/v1/track', publicTrackRoutes);
   app.use('/api/v1/shipper/business', shipperBusinessRoutes);
   app.use('/api/v1/shipments', shipmentRoutes);

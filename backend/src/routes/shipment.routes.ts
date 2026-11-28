@@ -37,6 +37,11 @@ import {
 } from '../services/shipmentService.js';
 import { serializeCsv } from '../utils/csv.js';
 import { HttpError } from '../utils/errors.js';
+import {
+  createExpressOrNewRouteBooking,
+  evaluateNewRouteBatching,
+  quoteExpressOrNewRouteBooking,
+} from '../services/hybridOrchestratorService.js';
 
 const router = Router();
 
@@ -156,6 +161,12 @@ router.post('/quote-preview', requireAuth, async (req, res) => {
     rules,
     allowSubsidy: true,
   });
+
+  // Preview reflects standard refundable token deduction so remaining balance is accurate
+  breakdown.remainingBalancePaise = Math.max(
+    0,
+    breakdown.computedPricePaise - breakdown.tokenAmountPaise
+  );
 
   res.json({
     success: true,
@@ -367,6 +378,18 @@ router.get('/', requireBusinessProfile, async (req, res) => {
 });
 
 router.post('/', requireBusinessProfile, async (req, res) => {
+  if (
+    req.body &&
+    typeof req.body === 'object' &&
+    ('slotId' in req.body || 'poolId' in req.body || 'driverId' in req.body)
+  ) {
+    throw new HttpError(
+      400,
+      'Shippers cannot select driver pickup slots, pools, or drivers; choose an operating serviceDate instead.',
+      'DRIVER_SLOT_SELECTION_FORBIDDEN'
+    );
+  }
+
   const parsed = createBookingSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new HttpError(
@@ -599,6 +622,37 @@ router.post('/exceptions/:exceptionId/resolve', requireBusinessProfile, async (r
   res.json({
     success: true,
     ...result,
+  });
+});
+
+router.post('/marketplace/quote', requireAuth, async (req, res) => {
+  const quote = await quoteExpressOrNewRouteBooking(req.body);
+  res.json({
+    success: true,
+    quote,
+  });
+});
+
+router.post('/marketplace/bookings', requireBusinessProfile, async (req, res) => {
+  const result = await createExpressOrNewRouteBooking({
+    businessId: req.businessProfile!._id,
+    userId: req.auth!.userId,
+    rawInput: req.body,
+  });
+  res.status(201).json({
+    success: true,
+    ...result,
+  });
+});
+
+router.post('/marketplace/new-route/evaluate', requireAuth, async (req, res) => {
+  const evaluation = await evaluateNewRouteBatching({
+    newShipmentId: typeof req.body?.shipmentId === 'string' ? req.body.shipmentId : undefined,
+    actorUserId: req.auth!.userId,
+  });
+  res.json({
+    success: true,
+    evaluation,
   });
 });
 

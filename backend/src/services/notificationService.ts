@@ -15,7 +15,10 @@ export type NotificationEventType =
   | 'DELIVERY_COMPLETED'
   | 'DELIVERY_FAILED'
   | 'ROLLOVER_REFUND_REQUIRED'
-  | 'POOLING_WINDOW_OPEN';
+  | 'POOLING_WINDOW_OPEN'
+  | 'MARKETPLACE_OFFER'
+  | 'TIER2_EARNING_SETTLED'
+  | 'EXPRESS_UNFILLED';
 
 export interface NotificationTemplate {
   title: (vars: Record<string, string>) => string;
@@ -85,6 +88,21 @@ export const NOTIFICATION_TEMPLATES: Record<
     title: (v) => `Pooling window open: ${v.corridorCode} (${v.slotLabel ?? ''})`,
     body: (v) =>
       `Select pickup/return availability for ${v.corridorName ?? v.corridorCode} (${v.departureDate ?? ''}) before cutoff ${v.cutoffTime ?? ''}.`,
+  },
+  MARKETPLACE_OFFER: {
+    title: (v) => `New ${v.opportunityType ?? 'Marketplace'} offer: ${v.opportunityCode}`,
+    body: (v) =>
+      `${v.route ?? ''} | Fixed payout ${v.payout ?? ''} | Respond before ${v.expiresAt ?? ''}.`,
+  },
+  TIER2_EARNING_SETTLED: {
+    title: (v) => `Tier 2 payout settled (${v.earningCode})`,
+    body: (v) =>
+      `Simulated settlement ${v.settlementRef ?? ''} completed for ${v.amount ?? ''} on trip ${v.tripCode ?? ''}.`,
+  },
+  EXPRESS_UNFILLED: {
+    title: (v) => `Express booking ${v.reference} expired unfilled`,
+    body: (v) =>
+      `No eligible Tier 2 vehicle accepted within the window. Full refund (${v.refundRef ?? 'initiated'}) processed.`,
   },
 };
 

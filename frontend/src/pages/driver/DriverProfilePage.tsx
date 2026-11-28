@@ -47,12 +47,27 @@ export function DriverProfilePage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Driver Profile</h1>
           <p className="text-xs text-slate-500">Read-only driver &amp; registered vehicle record</p>
         </div>
-        <Badge variant="info">{TIER_LABELS[fleetTier] ?? fleetTier}</Badge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {fleetTier === 'TIER_2' && profile?.tier2ApplicationStatus ? (
+            <Badge
+              variant={
+                profile.tier2ApplicationStatus === 'APPROVED'
+                  ? 'success'
+                  : profile.tier2ApplicationStatus === 'REJECTED'
+                    ? 'danger'
+                    : 'warning'
+              }
+            >
+              Application: {profile.tier2ApplicationStatus}
+            </Badge>
+          ) : null}
+          <Badge variant="info">{TIER_LABELS[fleetTier] ?? fleetTier}</Badge>
+        </div>
       </div>
 
       {registeredVehicle ? (

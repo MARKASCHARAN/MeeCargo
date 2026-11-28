@@ -11,6 +11,7 @@ import {
   Route as RouteIcon,
   Truck,
   X,
+  Zap,
 } from 'lucide-react';
 import { cn } from '../lib/cn';
 import { logoutUser } from '../api/client';
@@ -21,6 +22,7 @@ const shipperNav = [
   { to: '/shipper', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/shipper/corridors', label: 'Corridors & Pools', icon: RouteIcon, end: false },
   { to: '/shipper/book', label: 'Book Shipment', icon: PackagePlus, end: false },
+  { to: '/shipper/express', label: 'Express (One-Way)', icon: Zap, end: false },
   { to: '/shipper/shipments', label: 'Shipments', icon: ClipboardList, end: false },
   { to: '/shipper/import', label: 'CSV Import', icon: FileSpreadsheet, end: false },
   { to: '/shipper/profile', label: 'Business Profile', icon: Building2, end: false },

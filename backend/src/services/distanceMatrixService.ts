@@ -39,6 +39,37 @@ const FIXTURE_ROAD_LEGS: Record<string, { meters: number; seconds: number }> = {
   'AMD->AMD': { meters: 0, seconds: 0 },
 };
 
+function computeHaversineMeters(
+  fromCoords: [number, number],
+  toCoords: [number, number]
+): number {
+  const [lon1, lat1] = fromCoords;
+  const [lon2, lat2] = toCoords;
+  if (lon1 === lon2 && lat1 === lat2) return 0;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export function getCoordinateRoadEstimate(
+  fromCoords: [number, number],
+  toCoords: [number, number]
+): { meters: number; seconds: number } {
+  const straightMeters = computeHaversineMeters(fromCoords, toCoords);
+  if (straightMeters <= 5) {
+    return { meters: 0, seconds: 0 };
+  }
+  // Standard Indian highway road circuity factor (1.28x) and avg 48 km/h commercial freight speed
+  const roadMeters = Math.max(500, Math.round(straightMeters * 1.28));
+  const roadSeconds = Math.max(120, Math.round((roadMeters / 1000 / 48) * 3600));
+  return { meters: roadMeters, seconds: roadSeconds };
+}
+
 export function getFixtureRoadLeg(
   fromCode: string,
   toCode: string
@@ -57,7 +88,7 @@ export function getFixtureRoadLeg(
 
 export async function getRoadDistanceMatrix(
   points: MatrixPoint[],
-  options?: { useCache?: boolean }
+  options?: { useCache?: boolean; allowCoordinateEstimate?: boolean }
 ): Promise<RoadDistanceMatrix> {
   if (points.length < 2) {
     throw new HttpError(400, 'At least 2 points are required for a road matrix', 'VALIDATION_ERROR');
@@ -101,10 +132,28 @@ export async function getRoadDistanceMatrix(
 
   if (provider === 'FIXTURE') {
     distanceMatrixMeters = points.map((from) =>
-      points.map((to) => getFixtureRoadLeg(from.code, to.code).meters)
+      points.map((to) => {
+        try {
+          return getFixtureRoadLeg(from.code, to.code).meters;
+        } catch (err) {
+          if (options?.allowCoordinateEstimate) {
+            return getCoordinateRoadEstimate(from.coordinates, to.coordinates).meters;
+          }
+          throw err;
+        }
+      })
     );
     durationMatrixSeconds = points.map((from) =>
-      points.map((to) => getFixtureRoadLeg(from.code, to.code).seconds)
+      points.map((to) => {
+        try {
+          return getFixtureRoadLeg(from.code, to.code).seconds;
+        } catch (err) {
+          if (options?.allowCoordinateEstimate) {
+            return getCoordinateRoadEstimate(from.coordinates, to.coordinates).seconds;
+          }
+          throw err;
+        }
+      })
     );
   } else {
     const coordsParam = points

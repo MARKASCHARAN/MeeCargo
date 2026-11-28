@@ -110,9 +110,10 @@ router.get('/', async (_req, res) => {
     corridors: corridors.map((c) => {
       const corridorSlots = slotsByCorridor.get(String(c._id)) ?? [];
 
+      const corridorTz = (c as { timezone?: string }).timezone ?? 'Asia/Kolkata';
       const byDate = new Map<string, typeof corridorSlots>();
       for (const s of corridorSlots) {
-        const dateKey = toServiceDateKey(s.departureDate);
+        const dateKey = toServiceDateKey(s.departureDate, corridorTz);
         const group = byDate.get(dateKey) ?? [];
         group.push(s);
         byDate.set(dateKey, group);

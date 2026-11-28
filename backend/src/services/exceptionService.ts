@@ -402,6 +402,13 @@ export async function resolveShipmentException(params: {
     } else if (action === 'RESCHEDULE') {
       let resolvedTargetSlotId = targetSlotId;
       if (!resolvedTargetSlotId && targetServiceDate) {
+        if (!shipment.corridorId) {
+          throw new HttpError(
+            400,
+            'Corridor slot reschedule is only supported for corridor shipments',
+            'CORRIDOR_REQUIRED'
+          );
+        }
         const matched = await matchOperationalSlotForBooking({
           corridorId: shipment.corridorId,
           serviceDate: targetServiceDate,

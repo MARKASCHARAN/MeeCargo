@@ -6,6 +6,7 @@ import { DeliveryProof } from '../models/DeliveryProof.js';
 import { DriverProfile } from '../models/DriverProfile.js';
 import { DriverSlotCommitment } from '../models/DriverSlotCommitment.js';
 import { isValidShipmentTransition, Shipment } from '../models/Shipment.js';
+import { MarketplaceOpportunity } from '../models/MarketplaceOpportunity.js';
 import { Trip, type TripStatus } from '../models/Trip.js';
 import { TripEvent, type TripEventType } from '../models/TripEvent.js';
 import { Vehicle } from '../models/Vehicle.js';
@@ -13,6 +14,7 @@ import { emitShipmentProgress } from '../socket/poolGateway.js';
 import { HttpError } from '../utils/errors.js';
 import { sendLifecycleNotification } from './notificationService.js';
 import { savePodPhotoLocal } from './podStorageService.js';
+import { markTier2EarningCompleted } from './tier2PayoutService.js';
 import { calculateAndPersistTripLedger } from './tripEconomicsService.js';
 
 const ALLOWED_TRIP_TRANSITIONS: Record<TripStatus, TripStatus[]> = {
@@ -170,6 +172,23 @@ export async function transitionTripExecutionState(params: {
     eventType = 'TRIP_PAUSED';
     trip.pauseReason = reason.trim();
   } else {
+    const unaccounted = await Shipment.find({
+      $or: [{ tripId: trip._id }, { _id: { $in: trip.shipmentIds } }],
+      status: {
+        $in: ['PENDING_TOKEN', 'CONFIRMED', 'POOLED', 'LOCKED', 'PICKED_UP', 'IN_TRANSIT', 'AT_DESTINATION'],
+      },
+    }).select('reference status');
+
+    if (unaccounted.length > 0) {
+      throw new HttpError(
+        409,
+        `Cannot complete trip: ${unaccounted.length} shipment(s) still require delivery or exception resolution (${unaccounted
+          .map((s) => `${s.reference}: ${s.status}`)
+          .join(', ')}).`,
+        'UNACCOUNTED_DELIVERIES'
+      );
+    }
+
     eventType = 'TRIP_COMPLETED';
     trip.actualCompletedAt = occurredAt;
   }
@@ -218,6 +237,29 @@ export async function transitionTripExecutionState(params: {
 
   if (eventType === 'TRIP_COMPLETED') {
     await calculateAndPersistTripLedger(String(trip._id)).catch(() => undefined);
+    if (trip.allocationEconomics?.allocatedTier === 'TIER_2' || trip.marketplaceOpportunityId) {
+      await markTier2EarningCompleted({
+        tripId: trip._id,
+        actorUserId: new Types.ObjectId(driverUserId),
+      }).catch(() => undefined);
+    }
+    if (trip.marketplaceOpportunityId) {
+      await MarketplaceOpportunity.updateOne(
+        { _id: trip.marketplaceOpportunityId, status: { $in: ['ASSIGNED', 'ACCEPTED'] } },
+        {
+          $set: { status: 'COMPLETED' },
+          $push: {
+            auditHistory: {
+              action: 'OPPORTUNITY_COMPLETED',
+              toStatus: 'COMPLETED',
+              actorUserId: new Types.ObjectId(driverUserId),
+              reason: `Trip ${trip.tripCode} completed`,
+              at: occurredAt,
+            },
+          },
+        }
+      ).catch(() => undefined);
+    }
   }
 
   return { trip, event, deduplicated: false };

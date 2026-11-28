@@ -13,6 +13,10 @@ import {
   rotateRefreshToken,
   verifyPassword,
 } from '../services/authService.js';
+import {
+  submitOrResubmitTier2Application,
+  tier2ApplicationSubmissionSchema,
+} from '../services/tier2ApplicationService.js';
 import { HttpError } from '../utils/errors.js';
 
 const router = Router();
@@ -23,6 +27,7 @@ const registerSchema = z.object({
   phone: z.string().trim().min(8).max(20).optional(),
   password: z.string().min(8, 'Password must be at least 8 characters').max(128),
   role: z.enum(['SHIPPER', 'DRIVER']),
+  tier2Application: tier2ApplicationSubmissionSchema.omit({ fullName: true, phone: true }).optional(),
 });
 
 const loginSchema = z.object({
@@ -64,7 +69,7 @@ router.post('/register', authRateLimiter, async (req, res) => {
     throw new HttpError(400, 'Invalid registration payload', 'VALIDATION_ERROR', parsed.error.flatten());
   }
 
-  const { name, email, phone, password, role } = parsed.data;
+  const { name, email, phone, password, role, tier2Application } = parsed.data;
   const existing = await User.findOne({ email: email.toLowerCase() });
   if (existing) {
     throw new HttpError(409, 'An account with this email already exists', 'EMAIL_EXISTS');
@@ -84,9 +89,21 @@ router.post('/register', authRateLimiter, async (req, res) => {
       userId: user._id,
       name: user.name,
       phone: phone ?? 'Not provided',
-      availabilityStatus: 'AVAILABLE',
+      availabilityStatus: 'OFFLINE',
       fleetTier: 'TIER_2',
+      tier2ApplicationStatus: 'PENDING',
     });
+
+    if (tier2Application && phone) {
+      await submitOrResubmitTier2Application({
+        driverUserId: String(user._id),
+        input: {
+          fullName: user.name,
+          phone,
+          ...tier2Application,
+        },
+      });
+    }
   }
 
   const { accessToken, refreshToken } = await issueTokenPair(user);

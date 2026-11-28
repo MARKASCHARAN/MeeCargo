@@ -111,7 +111,7 @@ const csvRowSchema = z
   declaredContents: z.string().trim().min(2, 'declaredContents is required'),
   handlingNotes: z.string().trim().optional(),
   paymentChoice: z
-    .enum(['TOKEN_PLUS_PICKUP_BALANCE', 'FULL_PREPAID'])
+    .literal('TOKEN_PLUS_PICKUP_BALANCE')
     .default('TOKEN_PLUS_PICKUP_BALANCE'),
 })
   .refine((d) => Boolean(d.serviceDate || d.slotCode), {

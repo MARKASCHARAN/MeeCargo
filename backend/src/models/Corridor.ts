@@ -104,6 +104,7 @@ export interface ICorridor extends Document {
   slotSchedules: CorridorSlotSchedule[];
   estimatedOutboundDurationMin: number;
   turnaroundBufferMin: number;
+  timezone: string;
   isEstablishedRoute: boolean;
   guaranteedCeilingPaisePerKg: number;
   baseRatePaisePerKg: number;
@@ -165,6 +166,7 @@ const corridorSchema = new Schema<ICorridor>(
     },
     estimatedOutboundDurationMin: { type: Number, default: 120, min: 30, max: 720 },
     turnaroundBufferMin: { type: Number, default: 30, min: 0, max: 240 },
+    timezone: { type: String, default: 'Asia/Kolkata', trim: true },
     isEstablishedRoute: { type: Boolean, default: true },
     guaranteedCeilingPaisePerKg: { type: Number, required: true, min: 1 },
     baseRatePaisePerKg: { type: Number, required: true, min: 1 },

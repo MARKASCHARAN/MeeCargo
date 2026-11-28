@@ -21,6 +21,8 @@ import {
   type DimensionUnit,
   type WeightUnit,
 } from './cargoCalculator.js';
+import { toCorridorDateKey } from './driverSlotService.js';
+import { assertCargoCompatibleWithPool } from './poolService.js';
 
 export const addressSchema = z.object({
   addressLine: z.string().trim().min(3, 'Address line is required').max(250),
@@ -35,57 +37,80 @@ export const addressSchema = z.object({
   }),
 });
 
+export const MAX_DROP_ZONE_RADIUS_KM = 30;
+
+export function haversineDistanceKm(
+  a: [number, number],
+  b: [number, number]
+): number {
+  const [lng1, lat1] = a;
+  const [lng2, lat2] = b;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * sinLng * sinLng;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
 export const createBookingSchema = z
   .object({
     corridorId: z.string().min(1),
+    serviceType: z
+      .literal('STANDARD_SCHEDULED_SHARED_POOL')
+      .default('STANDARD_SCHEDULED_SHARED_POOL'),
     slotId: z.string().min(1).optional(),
     serviceDate: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'serviceDate must be in YYYY-MM-DD format')
       .optional(),
     pickupStopCode: z.string().trim().min(2).max(16),
-  deliveryStopCode: z.string().trim().min(2).max(16),
-  pickupAddress: addressSchema.optional(),
-  deliveryAddress: addressSchema,
-  recipientName: z.string().trim().min(2, 'Recipient name is required').max(120),
-  recipientPhone: z.string().trim().min(8, 'Recipient phone is required').max(20),
-  cargo: z.object({
-    category: z.enum([
-      'STANDARD_BOX',
-      'SACK_BAG',
-      'TEXTILE_ROLL',
-      'PALLET_BUNDLE',
-      'CUSTOM',
-    ]),
-    quantity: z.number().int().min(1).max(1000),
-    length: z.number().positive(),
-    width: z.number().positive(),
-    height: z.number().positive(),
-    dimensionUnit: z.enum(['CM', 'IN', 'M']).default('CM'),
-    unitActualWeight: z.number().positive(),
-    weightUnit: z.enum(['KG', 'G']).default('KG'),
-    stackable: z.boolean().default(true),
-    handlingRestrictions: z.array(z.string().trim().max(60)).default([]),
-    declaredContents: z.string().trim().min(2, 'Declared contents required').max(200),
-    handlingNotes: z.string().trim().max(300).optional(),
-    irregularCargoNotes: z.string().trim().max(300).optional(),
-  }),
-  paymentChoice: z
-    .enum(['TOKEN_PLUS_PICKUP_BALANCE', 'FULL_PREPAID'])
-    .default('TOKEN_PLUS_PICKUP_BALANCE'),
-  idempotencyKey: z.string().trim().min(4).max(120).optional(),
-  externalOrderRef: z.string().trim().min(1).max(80).optional(),
-})
+    deliveryStopCode: z.string().trim().min(2).max(16),
+    pickupAddress: addressSchema.optional(),
+    deliveryAddress: addressSchema,
+    recipientName: z.string().trim().min(2, 'Recipient name is required').max(120),
+    recipientPhone: z.string().trim().min(8, 'Recipient phone is required').max(20),
+    cargo: z.object({
+      category: z.enum([
+        'STANDARD_BOX',
+        'SACK_BAG',
+        'TEXTILE_ROLL',
+        'PALLET_BUNDLE',
+        'CUSTOM',
+      ]),
+      quantity: z.number().int().min(1).max(1000),
+      length: z.number().positive(),
+      width: z.number().positive(),
+      height: z.number().positive(),
+      dimensionUnit: z.enum(['CM', 'IN', 'M']).default('CM'),
+      unitActualWeight: z.number().positive(),
+      weightUnit: z.enum(['KG', 'G']).default('KG'),
+      stackable: z.boolean().default(true),
+      handlingRestrictions: z.array(z.string().trim().max(60)).default([]),
+      declaredContents: z.string().trim().min(2, 'Declared contents required').max(200),
+      handlingNotes: z.string().trim().max(300).optional(),
+      irregularCargoNotes: z.string().trim().max(300).optional(),
+    }),
+    paymentChoice: z
+      .literal('TOKEN_PLUS_PICKUP_BALANCE')
+      .default('TOKEN_PLUS_PICKUP_BALANCE'),
+    idempotencyKey: z.string().trim().min(4).max(120).optional(),
+    externalOrderRef: z.string().trim().min(1).max(80).optional(),
+  })
   .refine((data) => Boolean(data.slotId || data.serviceDate), {
     message: 'serviceDate is required for shipment booking',
     path: ['serviceDate'],
   });
 
-export function toServiceDateKey(date?: Date | string | null): string {
+export function toServiceDateKey(
+  date?: Date | string | null,
+  timeZone = 'Asia/Kolkata'
+): string {
   if (!date) return '';
-  const parsed = new Date(date);
-  if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toISOString().slice(0, 10);
+  return toCorridorDateKey(date, timeZone);
 }
 
 /**
@@ -99,10 +124,12 @@ export async function matchOperationalSlotForBooking(params: {
   chargeableWeightKg?: number;
   volumeCbm?: number;
   excludeSlotId?: Types.ObjectId;
+  timeZone?: string;
   now?: Date;
   session?: ClientSession | null;
 }): Promise<ISlot> {
   const now = params.now ?? new Date();
+  const timeZone = params.timeZone ?? 'Asia/Kolkata';
   const requiredWeight = params.chargeableWeightKg ?? 0;
   const requiredVolume = params.volumeCbm ?? 0;
 
@@ -117,7 +144,7 @@ export async function matchOperationalSlotForBooking(params: {
 
   const slotsOnDate = allSlots.filter(
     (s) =>
-      toServiceDateKey(s.departureDate) === params.serviceDate &&
+      toServiceDateKey(s.departureDate, timeZone) === params.serviceDate &&
       (!params.excludeSlotId || !s._id.equals(params.excludeSlotId))
   );
 
@@ -215,7 +242,13 @@ export async function matchOperationalSlotForBooking(params: {
   return ranked[0].slot;
 }
 
-export type CreateBookingInput = z.infer<typeof createBookingSchema>;
+export type CreateBookingInput = Omit<
+  z.infer<typeof createBookingSchema>,
+  'serviceType' | 'paymentChoice'
+> & {
+  serviceType?: 'STANDARD_SCHEDULED_SHARED_POOL';
+  paymentChoice?: 'TOKEN_PLUS_PICKUP_BALANCE';
+};
 
 export function generateShipmentReference(now: Date = new Date()): string {
   const datePart = now.toISOString().slice(0, 10).replace(/-/g, '');
@@ -289,10 +322,22 @@ export async function createShipmentBooking(params: {
     );
   }
 
-  const pickupStop = corridor.stops.find(
+  const orderedStops = [...corridor.stops].sort(
+    (a, b) => a.sequenceOrder - b.sequenceOrder
+  );
+  const originStop = orderedStops[0];
+  if (!originStop) {
+    throw new HttpError(
+      400,
+      'Corridor has no configured origin hub.',
+      'INVALID_CORRIDOR_STOPS'
+    );
+  }
+
+  const pickupStop = orderedStops.find(
     (s) => s.stopCode.toUpperCase() === input.pickupStopCode.toUpperCase()
   );
-  const deliveryStop = corridor.stops.find(
+  const deliveryStop = orderedStops.find(
     (s) => s.stopCode.toUpperCase() === input.deliveryStopCode.toUpperCase()
   );
 
@@ -304,10 +349,21 @@ export async function createShipmentBooking(params: {
     );
   }
 
-  if (pickupStop.sequenceOrder >= deliveryStop.sequenceOrder) {
+  if (pickupStop.stopCode.toUpperCase() !== originStop.stopCode.toUpperCase()) {
     throw new HttpError(
       400,
-      'Delivery stop must come after pickup stop along the outbound corridor',
+      `Origin pickup must use the corridor origin hub (${originStop.stopCode} — ${originStop.name}).`,
+      'INVALID_ORIGIN_STOP'
+    );
+  }
+
+  if (
+    deliveryStop.stopCode.toUpperCase() === originStop.stopCode.toUpperCase() ||
+    pickupStop.sequenceOrder >= deliveryStop.sequenceOrder
+  ) {
+    throw new HttpError(
+      400,
+      'Destination must be a downstream drop zone on the selected corridor',
       'INVALID_STOP_ORDER'
     );
   }
@@ -315,6 +371,27 @@ export async function createShipmentBooking(params: {
   const pickupAddress: StructuredAddress = input.pickupAddress ?? business.pickupAddress;
   assertValidBookingCoordinates(pickupAddress, 'Pickup');
   assertValidBookingCoordinates(input.deliveryAddress, 'Delivery');
+
+  const stopCoords = deliveryStop.location?.coordinates;
+  if (
+    Array.isArray(stopCoords) &&
+    stopCoords.length === 2 &&
+    !(stopCoords[0] === 0 && stopCoords[1] === 0)
+  ) {
+    const distKm = haversineDistanceKm(
+      input.deliveryAddress.location.coordinates,
+      stopCoords
+    );
+    if (distKm > MAX_DROP_ZONE_RADIUS_KM) {
+      throw new HttpError(
+        400,
+        `Recipient delivery location is ${distKm.toFixed(
+          1
+        )} km from ${deliveryStop.name} (permitted drop zone service area: ${MAX_DROP_ZONE_RADIUS_KM} km). Please adjust the delivery pin or choose the matching drop zone.`,
+        'DELIVERY_OUT_OF_DROP_ZONE'
+      );
+    }
+  }
 
   const cargoMetrics = calculateCargoMetrics({
     category: input.cargo.category as CargoCategory,
@@ -326,6 +403,11 @@ export async function createShipmentBooking(params: {
     unitActualWeight: input.cargo.unitActualWeight,
     weightUnit: input.cargo.weightUnit as WeightUnit,
   });
+
+  // Reject restricted cargo early before creating a PENDING_TOKEN booking
+  assertCargoCompatibleWithPool({
+    cargo: { handlingRestrictions: input.cargo.handlingRestrictions ?? [] },
+  } as IShipment);
 
   let slot: ISlot | null = null;
   if (input.slotId) {
@@ -341,7 +423,10 @@ export async function createShipmentBooking(params: {
       );
     }
     if (now >= slot.cutoffAt) {
-      const dateLabel = toServiceDateKey(slot.departureDate || slot.plannedDepartureAt);
+      const dateLabel = toServiceDateKey(
+        slot.departureDate || slot.plannedDepartureAt,
+        corridor.timezone ?? 'Asia/Kolkata'
+      );
       throw new HttpError(
         409,
         `Booking cutoff has passed for ${
@@ -371,59 +456,80 @@ export async function createShipmentBooking(params: {
       serviceDate: input.serviceDate,
       chargeableWeightKg: cargoMetrics.chargeableWeightKg,
       volumeCbm: cargoMetrics.totalVolumeCbm,
+      timeZone: corridor.timezone ?? 'Asia/Kolkata',
       now,
     });
   } else {
     throw new HttpError(400, 'serviceDate is required for booking', 'VALIDATION_ERROR');
   }
 
-  const shipment = await Shipment.create({
-    reference: generateShipmentReference(now),
-    businessId: business._id,
-    createdByUserId: userId,
-    corridorId: corridor._id,
-    slotId: slot._id,
-    pickupStopCode: pickupStop.stopCode,
-    pickupStopOrder: pickupStop.sequenceOrder,
-    deliveryStopCode: deliveryStop.stopCode,
-    deliveryStopOrder: deliveryStop.sequenceOrder,
-    pickupAddress,
-    deliveryAddress: input.deliveryAddress,
-    recipientName: input.recipientName,
-    recipientPhone: input.recipientPhone,
-    cargo: {
-      category: cargoMetrics.category,
-      quantity: cargoMetrics.quantity,
-      unitDimensionsCm: cargoMetrics.unitDimensionsCm,
-      unitActualWeightKg: cargoMetrics.unitActualWeightKg,
-      totalActualWeightKg: cargoMetrics.totalActualWeightKg,
-      volumetricDivisor: cargoMetrics.volumetricDivisor,
-      volumetricWeightKg: cargoMetrics.totalVolumetricWeightKg,
-      chargeableWeightKg: cargoMetrics.chargeableWeightKg,
-      billingBasis: cargoMetrics.billingBasis,
-      volumeCbm: cargoMetrics.totalVolumeCbm,
-      stackable: input.cargo.stackable,
-      handlingRestrictions: input.cargo.handlingRestrictions,
-      declaredContents: input.cargo.declaredContents,
-      handlingNotes: input.cargo.handlingNotes,
-      irregularCargoNotes: input.cargo.irregularCargoNotes,
-    },
-    paymentChoice: input.paymentChoice as PaymentChoice,
-    tokenStatus: 'PENDING',
-    status: 'PENDING_TOKEN',
-    ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
-    ...(input.externalOrderRef ? { externalOrderRef: input.externalOrderRef } : {}),
-    trackingToken: crypto.randomBytes(24).toString('hex'),
-    qrToken: crypto.randomBytes(16).toString('hex'),
-    statusHistory: [
-      {
-        status: 'PENDING_TOKEN',
-        at: now,
-        actorUserId: userId,
-        note: 'Booking created; awaiting refundable token confirmation',
+  let shipment: IShipment;
+  try {
+    shipment = await Shipment.create({
+      reference: generateShipmentReference(now),
+      businessId: business._id,
+      createdByUserId: userId,
+      corridorId: corridor._id,
+      slotId: slot._id,
+      pickupStopCode: pickupStop.stopCode,
+      pickupStopOrder: pickupStop.sequenceOrder,
+      deliveryStopCode: deliveryStop.stopCode,
+      deliveryStopOrder: deliveryStop.sequenceOrder,
+      pickupAddress,
+      deliveryAddress: input.deliveryAddress,
+      recipientName: input.recipientName,
+      recipientPhone: input.recipientPhone,
+      cargo: {
+        category: cargoMetrics.category,
+        quantity: cargoMetrics.quantity,
+        unitDimensionsCm: cargoMetrics.unitDimensionsCm,
+        unitActualWeightKg: cargoMetrics.unitActualWeightKg,
+        totalActualWeightKg: cargoMetrics.totalActualWeightKg,
+        volumetricDivisor: cargoMetrics.volumetricDivisor,
+        volumetricWeightKg: cargoMetrics.totalVolumetricWeightKg,
+        chargeableWeightKg: cargoMetrics.chargeableWeightKg,
+        billingBasis: cargoMetrics.billingBasis,
+        volumeCbm: cargoMetrics.totalVolumeCbm,
+        stackable: input.cargo.stackable,
+        handlingRestrictions: input.cargo.handlingRestrictions,
+        declaredContents: input.cargo.declaredContents,
+        handlingNotes: input.cargo.handlingNotes,
+        irregularCargoNotes: input.cargo.irregularCargoNotes,
       },
-    ],
-  });
+      serviceType: input.serviceType ?? 'STANDARD_SCHEDULED_SHARED_POOL',
+      paymentChoice: (input.paymentChoice ?? 'TOKEN_PLUS_PICKUP_BALANCE') as PaymentChoice,
+      tokenStatus: 'PENDING',
+      status: 'PENDING_TOKEN',
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+      ...(input.externalOrderRef ? { externalOrderRef: input.externalOrderRef } : {}),
+      trackingToken: crypto.randomBytes(24).toString('hex'),
+      qrToken: crypto.randomBytes(16).toString('hex'),
+      statusHistory: [
+        {
+          status: 'PENDING_TOKEN',
+          at: now,
+          actorUserId: userId,
+          note: 'Booking created; awaiting refundable token confirmation',
+        },
+      ],
+    });
+  } catch (err: unknown) {
+    const isDup =
+      typeof err === 'object' &&
+      err !== null &&
+      'code' in err &&
+      (err as { code?: number }).code === 11000;
+    if (isDup && input.idempotencyKey) {
+      const existing = await Shipment.findOne({
+        businessId: business._id,
+        idempotencyKey: input.idempotencyKey,
+      });
+      if (existing) {
+        return { shipment: existing, deduplicated: true };
+      }
+    }
+    throw err;
+  }
 
   return { shipment, deduplicated: false };
 }

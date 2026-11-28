@@ -20,6 +20,7 @@ import {
 } from './poolService.js';
 import { calculateDeterministicPrice, getActivePricingRules } from './pricingEngine.js';
 import { matchOperationalSlotForBooking } from './shipmentService.js';
+import { evaluatePoolForMarketplaceOpportunities } from './hybridOrchestratorService.js';
 
 export interface ViabilityEvaluation {
   viable: boolean;
@@ -122,9 +123,24 @@ export async function executePoolCutoff(params: {
   );
 
   if (!lockingPool) {
+    const freshPool = await Pool.findById(poolId);
+    if (freshPool?.status === 'LOCKED' || freshPool?.status === 'LOCKING') {
+      return {
+        pool: freshPool,
+        idempotentHit: true,
+        viabilityPassed: Boolean(freshPool.lockedSnapshot),
+      };
+    }
+    if (freshPool?.status === 'AWAITING_VIABILITY_DECISION') {
+      return {
+        pool: freshPool,
+        idempotentHit: true,
+        viabilityPassed: false,
+      };
+    }
     throw new HttpError(
       409,
-      `Pool cannot be locked from status ${existingPool.status}`,
+      `Pool cannot be locked from status ${freshPool?.status ?? existingPool.status}`,
       'POOL_LOCK_CONFLICT'
     );
   }
@@ -339,6 +355,13 @@ export async function executePoolCutoff(params: {
         poolId: String(lockResult.pool._id),
         actorUserId,
       });
+      if (!allocation.allocated) {
+        await evaluatePoolForMarketplaceOpportunities({
+          poolId: String(lockResult.pool._id),
+          actorUserId,
+          triggerType: 'OVERFLOW',
+        }).catch(() => undefined);
+      }
       const latestPool = await Pool.findById(lockResult.pool._id);
       return {
         ...lockResult,
@@ -436,6 +459,13 @@ export async function submitViabilityDecision(params: {
     // ROLLOVER path supports backend auto-matching via targetServiceDate (or explicit targetSlotId)
     let resolvedTargetSlotId = targetSlotId;
     if (!resolvedTargetSlotId && targetServiceDate) {
+      if (!shipment.corridorId) {
+        throw new HttpError(
+          400,
+          'Rollover to a corridor slot is only supported for corridor shipments.',
+          'CORRIDOR_REQUIRED'
+        );
+      }
       const matched = await matchOperationalSlotForBooking({
         corridorId: shipment.corridorId,
         serviceDate: targetServiceDate,
@@ -549,6 +579,21 @@ export async function processExpiredOpenPools(now: Date = new Date()): Promise<{
   processedCount: number;
   expiredEmptySlotsCount: number;
 }> {
+  // Recover any pools/slots stuck in intermediate LOCKING state (e.g. crashed worker > 2 min old)
+  const staleCutoff = new Date(now.getTime() - 2 * 60_000);
+  const stalePools = await Pool.find({
+    status: 'LOCKING',
+    updatedAt: { $lte: staleCutoff },
+  }).select('_id slotId');
+
+  for (const stale of stalePools) {
+    await Pool.updateOne({ _id: stale._id, status: 'LOCKING' }, { $set: { status: 'OPEN' } });
+    await Slot.updateOne(
+      { _id: stale.slotId, status: 'LOCKING' },
+      { $set: { status: 'OPEN' } }
+    );
+  }
+
   const expiredSlots = await Slot.find({
     status: 'OPEN',
     cutoffAt: { $lte: now },

@@ -18,6 +18,7 @@ import { RefreshToken } from '../models/RefreshToken.js';
 import { RouteMatrixCache } from '../models/RouteMatrixCache.js';
 import { Shipment } from '../models/Shipment.js';
 import { Slot } from '../models/Slot.js';
+import { Tier2Application } from '../models/Tier2Application.js';
 import { Trip } from '../models/Trip.js';
 import { TripEvent } from '../models/TripEvent.js';
 import { TripLedger } from '../models/TripLedger.js';
@@ -56,6 +57,7 @@ export async function resetDemoState(): Promise<void> {
     BackhaulRequest.deleteMany({}),
     DriverContract.deleteMany({}),
     DriverSlotCommitment.deleteMany({}),
+    Tier2Application.deleteMany({}),
     BusinessProfile.deleteMany({}),
     DriverProfile.deleteMany({}),
     Vehicle.deleteMany({}),
@@ -135,6 +137,14 @@ export async function seedDatabase(options: SeedOptions = {}) {
       passwordHash,
       isActive: true,
     },
+    {
+      name: 'Vikram Patel',
+      email: 'driver3@meecargo.demo',
+      phone: '+919800000203',
+      role: 'DRIVER' as const,
+      passwordHash,
+      isActive: true,
+    },
   ];
 
   // Clean up any legacy multi-owner demo accounts if present
@@ -159,6 +169,7 @@ export async function seedDatabase(options: SeedOptions = {}) {
   const shipper3 = userMap.get('shipper3@meecargo.demo')!;
   const driver1 = userMap.get('driver1@meecargo.demo')!;
   const driver2 = userMap.get('driver2@meecargo.demo')!;
+  const driver3 = userMap.get('driver3@meecargo.demo')!;
   const { owner: owner1 } = await provisionSinglePlatformOwner();
 
   const business1 = await BusinessProfile.findOneAndUpdate(
@@ -547,7 +558,7 @@ export async function seedDatabase(options: SeedOptions = {}) {
     { upsert: true, returnDocument: 'after', runValidators: true }
   );
 
-  await DriverProfile.findOneAndUpdate(
+  const driver2Profile = await DriverProfile.findOneAndUpdate(
     { userId: driver2._id },
     {
       $set: {
@@ -557,6 +568,7 @@ export async function seedDatabase(options: SeedOptions = {}) {
         availabilityStatus: 'AVAILABLE',
         accountStatus: 'ACTIVE',
         fleetTier: 'TIER_2',
+        tier2ApplicationStatus: 'APPROVED',
         vehicleId: tier2Vehicle._id,
         licenseNumber: 'GJ06-2020-0088123',
         homeBase: 'Anand Charotar Hub',
@@ -564,6 +576,162 @@ export async function seedDatabase(options: SeedOptions = {}) {
       $unset: { platformOwnerId: '' },
     },
     { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+
+  const driver2App = await Tier2Application.findOneAndUpdate(
+    { userId: driver2._id },
+    {
+      $set: {
+        applicationRef: 'MC-T2-DEMO-0001',
+        userId: driver2._id,
+        driverProfileId: driver2Profile._id,
+        vehicleId: tier2Vehicle._id,
+        fullName: driver2.name,
+        email: driver2.email,
+        phone: driver2.phone ?? '+919800000202',
+        address: {
+          addressLine: '14 Krishna Nagar, Lambhvel Road',
+          cityOrTown: 'Anand',
+          district: 'Anand',
+          state: 'Gujarat',
+          pincode: '388001',
+        },
+        identity: {
+          licenseNumber: 'GJ06-2020-0088123',
+          idProofType: 'AADHAAR',
+          idProofNumber: 'XXXX-XXXX-4412',
+        },
+        vehicle: {
+          registrationNumber: tier2Vehicle.registrationNumber,
+          vehicleCategory: tier2Vehicle.vehicleClass,
+          bodyType: tier2Vehicle.bodyType,
+          maxWeightKg: tier2Vehicle.maxWeightKg,
+          bedLengthCm: tier2Vehicle.bedDimensionsCm.length,
+          bedWidthCm: tier2Vehicle.bedDimensionsCm.width,
+          bedHeightCm: tier2Vehicle.bedDimensionsCm.height,
+          maxVolumeCbm: tier2Vehicle.maxVolumeCbm,
+          perKmRatePaise: tier2Vehicle.perKmRatePaise,
+        },
+        documents: {
+          rcNumber: 'GJ06MK2044',
+          insurancePolicyNumber: 'INS-GJ06-2026-2044',
+          insuranceValidUntil: new Date(now.getTime() + 240 * 86400_000),
+          fitnessValidUntil: new Date(now.getTime() + 300 * 86400_000),
+          permitNotes: 'All-Gujarat state goods carrier permit',
+          verificationStatus: 'VERIFIED',
+          verifiedAt: now,
+        },
+        status: 'APPROVED',
+        appliedAt: new Date(now.getTime() - 5 * 86400_000),
+        reviewedByUserId: owner1._id,
+        reviewedAt: now,
+        approvedAt: now,
+        reviewNote: 'Verified RC, insurance, and license for marketplace dispatch',
+        resubmissionCount: 0,
+        decisionHistory: [
+          {
+            action: 'SUBMITTED',
+            status: 'PENDING',
+            actorUserId: driver2._id,
+            at: new Date(now.getTime() - 5 * 86400_000),
+          },
+          {
+            action: 'APPROVED',
+            status: 'APPROVED',
+            actorUserId: owner1._id,
+            at: now,
+            note: 'Verified RC, insurance, and license for marketplace dispatch',
+          },
+        ],
+      },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+  await DriverProfile.updateOne(
+    { _id: driver2Profile._id },
+    { $set: { tier2ApplicationId: driver2App._id } }
+  );
+
+  // Seed a realistic PENDING Tier 2 marketplace driver applicant for Platform Owner review
+  const driver3Profile = await DriverProfile.findOneAndUpdate(
+    { userId: driver3._id },
+    {
+      $set: {
+        userId: driver3._id,
+        name: driver3.name,
+        phone: driver3.phone ?? '+919800000203',
+        availabilityStatus: 'OFFLINE',
+        accountStatus: 'ACTIVE',
+        fleetTier: 'TIER_2',
+        tier2ApplicationStatus: 'PENDING',
+        licenseNumber: 'GJ05-2021-0091450',
+        homeBase: 'Nadiad, Kheda',
+      },
+      $unset: { platformOwnerId: '' },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+
+  const driver3App = await Tier2Application.findOneAndUpdate(
+    { userId: driver3._id },
+    {
+      $setOnInsert: {
+        applicationRef: 'MC-T2-DEMO-0002',
+        userId: driver3._id,
+        driverProfileId: driver3Profile._id,
+        fullName: driver3.name,
+        email: driver3.email,
+        phone: driver3.phone ?? '+919800000203',
+        address: {
+          addressLine: 'Plot 28, Sardar Patel Estate, Santram Road',
+          cityOrTown: 'Nadiad',
+          district: 'Kheda',
+          state: 'Gujarat',
+          pincode: '387001',
+        },
+        identity: {
+          licenseNumber: 'GJ05-2021-0091450',
+          idProofType: 'PAN',
+          idProofNumber: 'ABCPV4821K',
+        },
+        vehicle: {
+          registrationNumber: 'GJ-07-MK-4102',
+          vehicleCategory: '10ft Closed Body LCV',
+          bodyType: 'CLOSED_BODY',
+          maxWeightKg: 1800,
+          bedLengthCm: 305,
+          bedWidthCm: 175,
+          bedHeightCm: 155,
+          maxVolumeCbm: 8.27,
+          perKmRatePaise: 2000,
+        },
+        documents: {
+          rcNumber: 'GJ07MK4102',
+          insurancePolicyNumber: 'INS-GJ07-2026-4102',
+          insuranceValidUntil: new Date(now.getTime() + 180 * 86400_000),
+          fitnessValidUntil: new Date(now.getTime() + 250 * 86400_000),
+          permitNotes: 'Gujarat state goods permit valid',
+          verificationStatus: 'PENDING',
+        },
+        status: 'PENDING',
+        appliedAt: new Date(now.getTime() - 2 * 3600_000),
+        resubmissionCount: 0,
+        decisionHistory: [
+          {
+            action: 'SUBMITTED',
+            status: 'PENDING',
+            actorUserId: driver3._id,
+            at: new Date(now.getTime() - 2 * 3600_000),
+            note: 'Submitted Tier 2 marketplace application for review',
+          },
+        ],
+      },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+  await DriverProfile.updateOne(
+    { _id: driver3Profile._id },
+    { $set: { tier2ApplicationId: driver3App._id } }
   );
 
   const contractStart = new Date();

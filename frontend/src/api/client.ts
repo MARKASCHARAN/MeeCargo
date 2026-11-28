@@ -31,9 +31,11 @@ import type {
   PlatformOwnerCatalog,
   PoolSummary,
   PriceCalculationBreakdown,
+  PublicTier2StatusSummary,
   PublicTrackingResponse,
   Shipment,
   StructuredAddress,
+  Tier2VerificationPolicy,
   TripSummary,
   UserRole,
   VehicleBodyType,
@@ -299,6 +301,7 @@ export function fetchOperationalImpactMetrics(): Promise<{
 
 export function createShipment(payload: {
   corridorId: string;
+  serviceType?: 'STANDARD_SCHEDULED_SHARED_POOL';
   serviceDate?: string;
   slotId?: string;
   pickupStopCode: string;
@@ -1005,4 +1008,333 @@ export function withdrawDriverPoolingSlot(
   return apiFetch(`/api/v1/driver/pooling-slots/${slotId}/commit`, {
     method: 'DELETE',
   });
+}
+
+export interface Tier2ApplicationSubmitPayload {
+  fullName: string;
+  phone: string;
+  address: {
+    addressLine: string;
+    cityOrTown: string;
+    district: string;
+    state: string;
+    pincode: string;
+  };
+  identity: {
+    licenseNumber: string;
+    idProofType: 'AADHAAR' | 'PAN' | 'PASSPORT' | 'VOTER_ID';
+    idProofNumber: string;
+  };
+  vehicle: {
+    registrationNumber: string;
+    vehicleCategory: string;
+    bodyType: VehicleBodyType;
+    maxWeightKg: number;
+    bedLengthCm: number;
+    bedWidthCm: number;
+    bedHeightCm: number;
+    maxVolumeCbm?: number;
+    perKmRatePaise?: number;
+  };
+  documents: {
+    rcNumber: string;
+    insurancePolicyNumber: string;
+    insuranceValidUntil?: string;
+    fitnessValidUntil?: string;
+    permitNotes?: string;
+  };
+}
+
+export function fetchDriverTier2Application(): Promise<{
+  success: boolean;
+  driverProfile: DriverProfile | null;
+  application: import('../types/api').Tier2DriverApplicationRecord | null;
+  applicationStatus: import('../types/api').Tier2ApplicationStatus;
+}> {
+  return apiFetch('/api/v1/driver/tier2-application');
+}
+
+export function submitDriverTier2Application(
+  payload: Tier2ApplicationSubmitPayload
+): Promise<{
+  success: boolean;
+  application: import('../types/api').Tier2DriverApplicationRecord;
+  driverProfile: DriverProfile;
+}> {
+  return apiFetch('/api/v1/driver/tier2-application', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchTier2MarketplaceOpportunities(): Promise<{
+  success: boolean;
+  eligible?: boolean;
+  ineligibilityReason?: string;
+  marketplaceOpportunities?: import('../types/api').HybridMarketplaceOpportunity[];
+  opportunities: import('../types/api').Tier2MarketplaceOpportunity[];
+  vehicle: import('../types/api').VehicleSummary | null;
+}> {
+  return apiFetch('/api/v1/driver/marketplace-opportunities');
+}
+
+export function viewTier2MarketplaceOpportunity(opportunityId: string): Promise<{
+  success: boolean;
+  opportunity: import('../types/api').HybridMarketplaceOpportunity;
+}> {
+  return apiFetch(`/api/v1/driver/marketplace-opportunities/${opportunityId}/view`, {
+    method: 'POST',
+  });
+}
+
+export function acceptTier2MarketplaceOpportunity(tripOrOppId: string): Promise<{
+  success: boolean;
+  trip: TripSummary;
+  message?: string;
+  opportunity?: import('../types/api').HybridMarketplaceOpportunity;
+  earning?: import('../types/api').Tier2EarningRecord;
+}> {
+  return apiFetch(`/api/v1/driver/marketplace-opportunities/${tripOrOppId}/accept`, {
+    method: 'POST',
+  });
+}
+
+export function declineTier2MarketplaceOpportunity(
+  opportunityId: string,
+  reason?: string
+): Promise<{ success: boolean; declined: boolean }> {
+  return apiFetch(`/api/v1/driver/marketplace-opportunities/${opportunityId}/decline`, {
+    method: 'POST',
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+}
+
+export function fetchDriverTier2Earnings(): Promise<
+  import('../types/api').Tier2DriverEarningsResponse
+> {
+  return apiFetch('/api/v1/driver/marketplace-earnings');
+}
+
+export function releaseDriverTripForReassignment(
+  tripId: string,
+  reason: string
+): Promise<{ success: boolean; dispatchedCount: number }> {
+  return apiFetch(`/api/v1/driver/trips/${tripId}/release-reassignment`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function quoteExpressMarketplaceBooking(payload: Record<string, unknown>): Promise<{
+  success: boolean;
+  quote: import('../types/api').ExpressMarketplaceQuote;
+}> {
+  return apiFetch('/api/v1/shipments/marketplace/quote', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createExpressMarketplaceBooking(payload: Record<string, unknown>): Promise<{
+  success: boolean;
+  shipment: Shipment;
+  opportunity?: { opportunityCode: string };
+  dispatchedCount?: number;
+}> {
+  return apiFetch('/api/v1/shipments/marketplace/bookings', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchOwnerMarketplacePolicy(): Promise<{
+  success: boolean;
+  policy: import('../types/api').MarketplacePolicyRecord;
+}> {
+  return apiFetch('/api/v1/platform-owner/marketplace-policy');
+}
+
+export function updateOwnerMarketplacePolicy(
+  updates: Partial<import('../types/api').MarketplacePolicyRecord>
+): Promise<{
+  success: boolean;
+  policy: import('../types/api').MarketplacePolicyRecord;
+}> {
+  return apiFetch('/api/v1/platform-owner/marketplace-policy', {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+}
+
+export function fetchOwnerMarketplaceOpportunities(): Promise<{
+  success: boolean;
+  opportunities: Array<{
+    _id: string;
+    opportunityCode: string;
+    opportunityType: import('../types/api').MarketplaceOpportunityType;
+    status: string;
+    originLabel: string;
+    destinationLabel: string;
+    payoutQuote: { spotPayoutPaise: number };
+  }>;
+}> {
+  return apiFetch('/api/v1/platform-owner/marketplace-opportunities');
+}
+
+export function reassignOwnerOpportunity(
+  opportunityId: string,
+  reason: string
+): Promise<{ success: boolean; dispatchedCount: number }> {
+  return apiFetch(`/api/v1/platform-owner/marketplace-opportunities/${opportunityId}/reassign`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function fetchOwnerTier2Earnings(): Promise<{
+  success: boolean;
+  totals: {
+    totalRecords: number;
+    pendingSettlementPaise: number;
+    paidPaise: number;
+    onHoldPaise: number;
+    acceptedPaise: number;
+  };
+  earnings: import('../types/api').Tier2EarningRecord[];
+}> {
+  return apiFetch('/api/v1/platform-owner/tier2-earnings');
+}
+
+export function settleOwnerTier2Earning(earningId: string): Promise<{
+  success: boolean;
+  earning: import('../types/api').Tier2EarningRecord;
+}> {
+  return apiFetch(`/api/v1/platform-owner/tier2-earnings/${earningId}/settle`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function fetchOwnerTier2Applications(params?: {
+  status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ALL';
+  search?: string;
+}): Promise<{
+  success: boolean;
+  applications: import('../types/api').Tier2DriverApplicationRecord[];
+  counts: { pending: number; approved: number; rejected: number; total: number };
+}> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status);
+  if (params?.search) qs.set('search', params.search);
+  const query = qs.toString();
+  return apiFetch(`/api/v1/platform-owner/tier2-applications${query ? `?${query}` : ''}`);
+}
+
+export function approveOwnerTier2Application(
+  applicationId: string,
+  reviewNote?: string
+): Promise<{
+  success: boolean;
+  application: import('../types/api').Tier2DriverApplicationRecord;
+}> {
+  return apiFetch(`/api/v1/platform-owner/tier2-applications/${applicationId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(reviewNote ? { reviewNote } : {}),
+  });
+}
+
+export function rejectOwnerTier2Application(
+  applicationId: string,
+  reason: string
+): Promise<{
+  success: boolean;
+  application: import('../types/api').Tier2DriverApplicationRecord;
+}> {
+  return apiFetch(`/api/v1/platform-owner/tier2-applications/${applicationId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function fetchPublicTier2Policy(): Promise<{
+  success: boolean;
+  policy: Tier2VerificationPolicy;
+}> {
+  return apiFetch('/api/v1/public/tier2/policy');
+}
+
+export async function submitPublicTier2Application(formData: FormData): Promise<
+  AuthResponse & {
+    applicationRef: string;
+    status: import('../types/api').Tier2ApplicationStatus;
+    appliedAt: string;
+    uploadedDocumentsCount: number;
+  }
+> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/public/tier2/apply`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      data?.error ?? `Application failed with status ${response.status}`,
+      data?.code
+    );
+  }
+  return data;
+}
+
+export function lookupPublicTier2Status(payload: {
+  applicationRef: string;
+  email: string;
+}): Promise<
+  {
+    success: boolean;
+  } & PublicTier2StatusSummary
+> {
+  return apiFetch('/api/v1/public/tier2/application-status', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function openAuthenticatedDriverDocument(
+  path: string,
+  allowRetry = true
+): Promise<void> {
+  const token = useAuthStore.getState().accessToken;
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: 'include',
+    headers,
+  });
+
+  if (response.status === 401 && allowRetry) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      return openAuthenticatedDriverDocument(path, false);
+    }
+  }
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new ApiError(
+      response.status,
+      data?.error ?? `Unable to open document (${response.status})`,
+      data?.code
+    );
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  window.open(objectUrl, '_blank', 'noopener,noreferrer');
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }

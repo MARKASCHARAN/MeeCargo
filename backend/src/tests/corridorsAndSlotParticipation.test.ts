@@ -678,6 +678,6 @@ describe('MC-045 to MC-050: Corridor Lifecycle, Slot Templates, Filters & Driver
     });
 
     expect(outcome.allocated).toBe(false);
-    expect(outcome.reason).toMatch(/No feasible driver-owned or marketplace vehicle/i);
+    expect(outcome.reason).toMatch(/No feasible .*driver-owned vehicle/i);
   });
 });

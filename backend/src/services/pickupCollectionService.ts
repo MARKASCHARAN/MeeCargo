@@ -14,10 +14,19 @@ import { HttpError } from '../utils/errors.js';
 export function computeRemainingPickupBalancePaise(params: {
   lockedPricePaise: number;
   tokenPaidPaise: number;
+  otherPaidPaise?: number;
   adjustmentsPaise?: number;
 }): number {
-  const { lockedPricePaise, tokenPaidPaise, adjustmentsPaise = 0 } = params;
-  return Math.max(0, Math.round(lockedPricePaise - tokenPaidPaise - adjustmentsPaise));
+  const {
+    lockedPricePaise,
+    tokenPaidPaise,
+    otherPaidPaise = 0,
+    adjustmentsPaise = 0,
+  } = params;
+  return Math.max(
+    0,
+    Math.round(lockedPricePaise - tokenPaidPaise - otherPaidPaise - adjustmentsPaise)
+  );
 }
 
 export async function recordPickupBalanceCollection(params: {
@@ -79,11 +88,32 @@ export async function recordPickupBalanceCollection(params: {
       shipment.pricingSnapshot?.finalLockedPricePaise ??
       shipment.pricingSnapshot?.projectedPricePaise ??
       0;
-    const tokenPaidPaise = shipment.pricingSnapshot?.tokenPaidPaise ?? 0;
+
+    // Reconcile against persisted SUCCESS Payment records to prevent double-charging token or prior balance payments
+    const validPayments = await Payment.find({
+      shipmentId: shipment._id,
+      status: 'SUCCESS',
+      type: { $in: ['TOKEN', 'PICKUP_BALANCE'] },
+    })
+      .select('type amountPaise')
+      .session(session);
+
+    const tokenPaidFromPayments = validPayments
+      .filter((p) => p.type === 'TOKEN')
+      .reduce((sum, p) => sum + p.amountPaise, 0);
+    const otherPaidFromPayments = validPayments
+      .filter((p) => p.type !== 'TOKEN')
+      .reduce((sum, p) => sum + p.amountPaise, 0);
+
+    const tokenPaidPaise = Math.max(
+      shipment.pricingSnapshot?.tokenPaidPaise ?? 0,
+      tokenPaidFromPayments
+    );
 
     const remainingBalancePaise = computeRemainingPickupBalancePaise({
       lockedPricePaise,
       tokenPaidPaise,
+      otherPaidPaise: otherPaidFromPayments,
       adjustmentsPaise,
     });
 
@@ -94,29 +124,49 @@ export async function recordPickupBalanceCollection(params: {
       .toString('hex')
       .toUpperCase()}`;
 
-    const [collection] = await PickupCollection.create(
-      [
-        {
+    let collection;
+    try {
+      const [created] = await PickupCollection.create(
+        [
+          {
+            shipmentId: shipment._id,
+            tripId: trip._id,
+            businessId: shipment.businessId,
+            collectedByDriverId: new Types.ObjectId(driverUserId),
+            lockedPricePaise,
+            tokenPaidPaise,
+            adjustmentsPaise,
+            remainingBalancePaise,
+            collectedAmountPaise: remainingBalancePaise,
+            paymentMethod,
+            providerRef,
+            collectionState: 'COLLECTED_BY_DRIVER',
+            settlementState: 'PENDING_SETTLEMENT',
+            isSimulated,
+            ...(idempotencyKey ? { idempotencyKey } : {}),
+            collectedAt: new Date(),
+          },
+        ],
+        { session: session ?? undefined }
+      );
+      collection = created;
+    } catch (err: unknown) {
+      const isDup =
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        (err as { code?: number }).code === 11000;
+      if (isDup) {
+        const dup = await PickupCollection.findOne({
           shipmentId: shipment._id,
-          tripId: trip._id,
-          businessId: shipment.businessId,
-          collectedByDriverId: new Types.ObjectId(driverUserId),
-          lockedPricePaise,
-          tokenPaidPaise,
-          adjustmentsPaise,
-          remainingBalancePaise,
-          collectedAmountPaise: remainingBalancePaise,
-          paymentMethod,
-          providerRef,
           collectionState: 'COLLECTED_BY_DRIVER',
-          settlementState: 'PENDING_SETTLEMENT',
-          isSimulated,
-          ...(idempotencyKey ? { idempotencyKey } : {}),
-          collectedAt: new Date(),
-        },
-      ],
-      { session: session ?? undefined }
-    );
+        }).session(session);
+        if (dup) {
+          return { collection: dup, deduplicated: true };
+        }
+      }
+      throw err;
+    }
 
     if (remainingBalancePaise > 0) {
       await Payment.create(

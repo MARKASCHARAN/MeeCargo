@@ -405,16 +405,143 @@ export interface VehicleSummary {
   };
 }
 
+export type Tier2ApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type IdProofType = 'AADHAAR' | 'PAN' | 'PASSPORT' | 'VOTER_ID';
+
 export interface DriverProfile {
   _id: string;
   userId: string;
   name: string;
   phone: string;
   availabilityStatus: DriverAvailability;
+  accountStatus?: DriverAccountStatus;
   fleetTier: FleetTier;
+  tier2ApplicationStatus?: Tier2ApplicationStatus;
+  tier2ApplicationId?: string;
   vehicleId?: VehicleSummary | null;
   licenseNumber?: string;
   homeBase?: string;
+}
+
+export interface Tier2UploadedDocument {
+  docType: 'DRIVING_LICENSE' | 'IDENTITY_PROOF' | 'VEHICLE_RC' | 'INSURANCE_POLICY';
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  storageKey: string;
+  uploadedAt: string;
+}
+
+export interface Tier2VerificationPolicy {
+  requiredDocuments: Array<{
+    docType: Tier2UploadedDocument['docType'];
+    fieldName: 'licenseFile' | 'idProofFile' | 'rcFile' | 'insuranceFile';
+    label: string;
+    required: boolean;
+  }>;
+  allowedMimeTypes: string[];
+  maxFileSizeBytes: number;
+  payoutPolicySummary: string;
+}
+
+export interface PublicTier2StatusSummary {
+  applicationRef: string;
+  status: Tier2ApplicationStatus;
+  appliedAt: string;
+  reviewedAt?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  rejectionReason?: string;
+  vehicleRegistrationNumber: string;
+  vehicleCategory: string;
+  documentsVerificationStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  uploadedDocumentsCount: number;
+  nextSteps: string;
+}
+
+export interface Tier2DriverApplicationRecord {
+  _id: string;
+  applicationRef?: string;
+  userId: string;
+  driverProfileId?: string;
+  vehicleId?: string | { _id: string; registrationNumber: string; operationalStatus: string; isAvailable: boolean };
+  fullName: string;
+  email: string;
+  phone: string;
+  address: {
+    addressLine: string;
+    cityOrTown: string;
+    district: string;
+    state: string;
+    pincode: string;
+  };
+  identity: {
+    licenseNumber: string;
+    idProofType: IdProofType;
+    idProofNumber: string;
+  };
+  vehicle: {
+    registrationNumber: string;
+    vehicleCategory: string;
+    bodyType: VehicleBodyType;
+    maxWeightKg: number;
+    bedLengthCm: number;
+    bedWidthCm: number;
+    bedHeightCm: number;
+    maxVolumeCbm: number;
+    perKmRatePaise: number;
+  };
+  documents: {
+    rcNumber: string;
+    insurancePolicyNumber: string;
+    insuranceValidUntil?: string;
+    fitnessValidUntil?: string;
+    permitNotes?: string;
+    verificationStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
+    verifiedAt?: string;
+  };
+  uploadedDocuments?: Tier2UploadedDocument[];
+  status: Tier2ApplicationStatus;
+  appliedAt: string;
+  reviewedByUserId?: string | { _id: string; name: string; email: string };
+  reviewedAt?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  rejectionReason?: string;
+  reviewNote?: string;
+  resubmissionCount: number;
+  decisionHistory: Array<{
+    action: 'SUBMITTED' | 'RESUBMITTED' | 'APPROVED' | 'REJECTED';
+    status: Tier2ApplicationStatus;
+    actorUserId: string;
+    at: string;
+    note?: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Tier2MarketplaceOpportunity {
+  _id: string;
+  tripCode: string;
+  status: string;
+  corridor?: {
+    _id: string;
+    code: string;
+    name: string;
+    stops?: CorridorStopSummary[];
+  };
+  plannedDepartureAt: string;
+  estimatedEndAt: string;
+  stopsSummary: Array<{ stopCode: string; name: string; sequenceOrder: number }>;
+  shipmentCount: number;
+  totalChargeableWeightKg: number;
+  totalVolumeCbm: number;
+  estimatedDistanceKm: number;
+  estimatedPayoutPaise: number;
+  isAssignedToMe: boolean;
+  eligibleToAccept: boolean;
+  ineligibleReason?: string;
 }
 
 export interface TripSummary {
@@ -989,4 +1116,163 @@ export interface ManagedContractDriver {
 
 export interface PlatformOwnerCatalog {
   corridors: CorridorScheduleRecord[];
+}
+
+export type MarketplaceOpportunityType =
+  | 'OVERFLOW'
+  | 'RIGHT_SIZING'
+  | 'EXPRESS'
+  | 'NEW_ROUTE';
+
+export interface HybridMarketplaceOpportunity {
+  id: string;
+  opportunityCode: string;
+  opportunityType: MarketplaceOpportunityType;
+  status: string;
+  offerVersion: number;
+  originLabel: string;
+  destinationLabel: string;
+  originStopCode: string;
+  deliveryStopCode: string;
+  stopsSummary: Array<{ stopCode: string; name: string; sequenceOrder: number }>;
+  serviceWindowStartAt: string;
+  pickupDeadlineAt: string;
+  deliveryDeadlineAt: string;
+  offerExpiresAt: string;
+  earlyFillFirstRefusalUntil?: string;
+  estimatedDistanceKm: number;
+  estimatedDurationMin: number;
+  cargoSummary: {
+    shipmentCount: number;
+    totalWeightKg: number;
+    totalVolumeCbm: number;
+    maxUnitLengthCm: number;
+    maxUnitWidthCm: number;
+    maxUnitHeightCm: number;
+    allStackable: boolean;
+    handlingRestrictions: string[];
+    summaryLabel: string;
+  };
+  payoutQuote: {
+    currency: 'INR';
+    spotPayoutPaise: number;
+    baseFeePaise: number;
+    distancePayPaise: number;
+    cargoAllowancePaise: number;
+    urgencyPremiumPaise: number;
+    approachAllowancePaise: number;
+    tollAllowancePaise: number;
+    tier1MinGuaranteeIncludedPaise: number;
+    policyVersion: string;
+  };
+  driverOfferStatus: string | null;
+  tripId?: string;
+  piiUnlocked: boolean;
+  assignedStopContacts?: Array<{
+    shipmentId: string;
+    reference: string;
+    pickupContact: { name: string; phone: string } | null;
+    pickupAddress: StructuredAddress;
+    recipientName: string;
+    recipientPhone: string;
+    deliveryAddress: StructuredAddress;
+  }>;
+}
+
+export type Tier2EarningStatus =
+  | 'OFFERED'
+  | 'ACCEPTED'
+  | 'TRIP_COMPLETED'
+  | 'PENDING_SETTLEMENT'
+  | 'PAID'
+  | 'ON_HOLD'
+  | 'DISPUTED'
+  | 'REVERSED';
+
+export interface Tier2EarningRecord {
+  _id: string;
+  earningCode: string;
+  opportunityType: MarketplaceOpportunityType;
+  status: Tier2EarningStatus;
+  currency: 'INR';
+  grossPayoutPaise: number;
+  adjustmentsPaise: number;
+  netPayablePaise: number;
+  policyVersion: string;
+  isSimulated: boolean;
+  settlementRef?: string;
+  settledAt?: string;
+  completedAt?: string;
+  holdOrDisputeReason?: string;
+  reversalReason?: string;
+  createdAt: string;
+  tripId?: { _id: string; tripCode: string; status: string };
+  driverUserId?: { _id: string; name: string; email: string };
+  opportunityId?: {
+    _id: string;
+    opportunityCode: string;
+    opportunityType: MarketplaceOpportunityType;
+    originLabel: string;
+    destinationLabel: string;
+  };
+}
+
+export interface Tier2DriverEarningsResponse {
+  success: boolean;
+  summary: {
+    currency: 'INR';
+    isSimulated: boolean;
+    totalEarnedPaise: number;
+    pendingSettlementPaise: number;
+    paidPaise: number;
+    activeAcceptedPaise: number;
+    onHoldOrDisputedPaise: number;
+    completedTripsCount: number;
+  };
+  earnings: Tier2EarningRecord[];
+}
+
+export interface MarketplacePolicyRecord {
+  policyVersion: string;
+  isActive: boolean;
+  enabledOpportunityTypes: MarketplaceOpportunityType[];
+  earlyFillFirstRefusalMin: number;
+  offerExpiryMin: number;
+  maxActiveOffersPerOpportunity: number;
+  overflowMinChargeableWeightKg: number;
+  overflowMinVolumeCbm: number;
+  rightSizingMinNetSavingsPaise: number;
+  newRouteViabilityThresholdPct: number;
+  minContributionPaise: number;
+  maxNewRouteDetourPct: number;
+  payoutPolicy: {
+    baseDispatchFeePaise: number;
+    defaultPerKmPaise: number;
+    perKmByBodyTypePaise: Record<VehicleBodyType, number>;
+    weightSurchargePaisePerKg: number;
+    volumeSurchargePaisePerCbm: number;
+    expressUrgencyMultiplierBps: number;
+    approachAllowancePaisePerKm: number;
+    maxApproachBillableKm: number;
+    defaultTollAllowancePaise: number;
+  };
+  expressPricing: {
+    baseFeePaise: number;
+    ratePaisePerKm: number;
+    chargeableKgRatePaise: number;
+    minCustomerChargePaise: number;
+    platformMinMarginPaise: number;
+  };
+}
+
+export interface ExpressMarketplaceQuote {
+  serviceType: 'EXPRESS_MARKETPLACE' | 'NEW_ROUTE_MARKETPLACE';
+  compatibleVehicleCount: number;
+  estimatedDistanceKm: number;
+  estimatedDurationMin: number;
+  customerChargePaise: number;
+  estimatedSpotPayoutPaise: number;
+  platformMarginPaise: number;
+  policyVersion: string;
+  cargo: CargoCalculationResult;
 }

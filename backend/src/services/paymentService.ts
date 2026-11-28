@@ -97,26 +97,25 @@ export async function processTokenPayment(params: {
       env.PAYMENT_MODE === 'SIMULATED' ? 'SIM-TOK' : 'TST-TOK'
     }-${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
 
-    const [payment] = await Payment.create(
-      [
-        {
-          shipmentId: shipment._id,
-          businessId,
-          type: 'TOKEN',
-          amountPaise: quote.tokenAmountPaise,
-          status: simulateOutcome,
-          mode: env.PAYMENT_MODE,
-          isSimulated: env.PAYMENT_MODE === 'SIMULATED',
-          providerRef,
-          ...(idempotencyKey ? { idempotencyKey } : {}),
-          actorUserId: shipment.createdByUserId,
-          processedAt: new Date(),
-        },
-      ],
-      { session: session ?? undefined }
-    );
-
     if (simulateOutcome === 'FAILED') {
+      const [payment] = await Payment.create(
+        [
+          {
+            shipmentId: shipment._id,
+            businessId,
+            type: 'TOKEN',
+            amountPaise: quote.tokenAmountPaise,
+            status: 'FAILED',
+            mode: env.PAYMENT_MODE,
+            isSimulated: env.PAYMENT_MODE === 'SIMULATED',
+            providerRef,
+            ...(idempotencyKey ? { idempotencyKey } : {}),
+            actorUserId: shipment.createdByUserId,
+            processedAt: new Date(),
+          },
+        ],
+        { session: session ?? undefined }
+      );
       shipment.tokenStatus = 'UNPAID';
       shipment.statusHistory.push({
         status: shipment.status,
@@ -128,7 +127,8 @@ export async function processTokenPayment(params: {
       return { payment, shipment, deduplicated: false };
     }
 
-    // Reserve capacity on Slot atomically if not yet confirmed
+    // Reserve capacity on Slot atomically BEFORE persisting SUCCESS payment so a capacity
+    // conflict can never leave an orphaned paid token in standalone non-transactional mode.
     if (shipment.status === 'PENDING_TOKEN') {
       if (!isValidShipmentTransition(shipment.status, 'CONFIRMED')) {
         throw new HttpError(409, 'Invalid shipment status transition', 'INVALID_TRANSITION');
@@ -174,6 +174,45 @@ export async function processTokenPayment(params: {
       }
       slot.reservedWeightKg = updatedSlot.reservedWeightKg;
       slot.reservedVolumeCbm = updatedSlot.reservedVolumeCbm;
+    }
+
+    let payment: IPayment;
+    try {
+      const [createdPayment] = await Payment.create(
+        [
+          {
+            shipmentId: shipment._id,
+            businessId,
+            type: 'TOKEN',
+            amountPaise: quote.tokenAmountPaise,
+            status: 'SUCCESS',
+            mode: env.PAYMENT_MODE,
+            isSimulated: env.PAYMENT_MODE === 'SIMULATED',
+            providerRef,
+            ...(idempotencyKey ? { idempotencyKey } : {}),
+            actorUserId: shipment.createdByUserId,
+            processedAt: new Date(),
+          },
+        ],
+        { session: session ?? undefined }
+      );
+      payment = createdPayment;
+    } catch (err: unknown) {
+      const isDup =
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        (err as { code?: number }).code === 11000;
+      if (isDup && idempotencyKey) {
+        const dupPayment = await Payment.findOne({
+          shipmentId: shipment._id,
+          idempotencyKey,
+        }).session(session);
+        if (dupPayment) {
+          return { payment: dupPayment, shipment, deduplicated: true };
+        }
+      }
+      throw err;
     }
 
     shipment.tokenStatus = 'PAID';

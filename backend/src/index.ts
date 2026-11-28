@@ -3,6 +3,8 @@ import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './config/database.js';
 import { createApp } from './app.js';
 import { processExpiredOpenPools } from './services/cutoffService.js';
+import { processScheduledPoolingWindowOpenings } from './services/driverSlotService.js';
+import { processExpiredMarketplaceOpportunities } from './services/hybridOrchestratorService.js';
 import { attachSocketGateway } from './socket/poolGateway.js';
 
 async function bootstrap() {
@@ -12,10 +14,21 @@ async function bootstrap() {
   const server = http.createServer(app);
   attachSocketGateway(server);
 
-  const cutoffInterval = setInterval(() => {
-    void processExpiredOpenPools().catch((err) => {
+  const runScheduledSweeps = async () => {
+    await processScheduledPoolingWindowOpenings().catch((err) => {
+      console.warn('[AutoOpen] Sweep error:', err instanceof Error ? err.message : err);
+    });
+    await processExpiredOpenPools().catch((err) => {
       console.warn('[AutoCutoff] Sweep error:', err instanceof Error ? err.message : err);
     });
+    await processExpiredMarketplaceOpportunities().catch((err) => {
+      console.warn('[Marketplace] Sweep error:', err instanceof Error ? err.message : err);
+    });
+  };
+
+  void runScheduledSweeps();
+  const cutoffInterval = setInterval(() => {
+    void runScheduledSweeps();
   }, 60_000);
   cutoffInterval.unref();
 

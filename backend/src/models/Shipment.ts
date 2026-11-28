@@ -19,6 +19,10 @@ export type ShipmentStatus =
   | 'CANCELLED'
   | 'ROLLED_OVER';
 
+export type ServiceScope =
+  | 'STANDARD_SCHEDULED_SHARED_POOL'
+  | 'EXPRESS_MARKETPLACE'
+  | 'NEW_ROUTE_MARKETPLACE';
 export type PaymentChoice = 'TOKEN_PLUS_PICKUP_BALANCE' | 'FULL_PREPAID';
 export type TokenPaymentState =
   | 'UNPAID'
@@ -83,10 +87,14 @@ export interface IShipment extends Document {
   reference: string;
   businessId: Types.ObjectId;
   createdByUserId: Types.ObjectId;
-  corridorId: Types.ObjectId;
-  slotId: Types.ObjectId;
+  corridorId?: Types.ObjectId;
+  slotId?: Types.ObjectId;
   poolId?: Types.ObjectId;
   tripId?: Types.ObjectId;
+  marketplaceOpportunityId?: Types.ObjectId;
+  pickupContact?: { name: string; phone: string };
+  requestedPickupWindow?: { startAt: Date; endAt: Date };
+  requestedDeliveryDeadlineAt?: Date;
   pickupStopCode: string;
   pickupStopOrder: number;
   deliveryStopCode: string;
@@ -96,6 +104,7 @@ export interface IShipment extends Document {
   recipientName: string;
   recipientPhone: string;
   cargo: ShipmentCargo;
+  serviceType?: ServiceScope;
   paymentChoice: PaymentChoice;
   tokenStatus: TokenPaymentState;
   pricingSnapshot?: ShipmentPricingSnapshot;
@@ -119,7 +128,7 @@ export interface IShipment extends Document {
 const ALLOWED_SHIPMENT_TRANSITIONS: Record<ShipmentStatus, ShipmentStatus[]> = {
   DRAFT: ['PENDING_TOKEN', 'CANCELLED'],
   PENDING_TOKEN: ['CONFIRMED', 'CANCELLED'],
-  CONFIRMED: ['POOLED', 'CANCELLED', 'ROLLED_OVER'],
+  CONFIRMED: ['POOLED', 'LOCKED', 'CANCELLED', 'ROLLED_OVER'],
   POOLED: ['LOCKED', 'CANCELLED', 'ROLLED_OVER'],
   LOCKED: ['PICKED_UP', 'FAILED', 'CANCELLED'],
   PICKED_UP: ['IN_TRANSIT', 'PARTIALLY_DELIVERED', 'FAILED'],
@@ -168,10 +177,33 @@ const shipmentSchema = new Schema<IShipment>(
       index: true,
     },
     createdByUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    corridorId: { type: Schema.Types.ObjectId, ref: 'Corridor', required: true },
-    slotId: { type: Schema.Types.ObjectId, ref: 'Slot', required: true, index: true },
+    corridorId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Corridor',
+      required: function (this: IShipment) {
+        return !this.serviceType || this.serviceType === 'STANDARD_SCHEDULED_SHARED_POOL';
+      },
+    },
+    slotId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Slot',
+      required: function (this: IShipment) {
+        return !this.serviceType || this.serviceType === 'STANDARD_SCHEDULED_SHARED_POOL';
+      },
+      index: true,
+    },
     poolId: { type: Schema.Types.ObjectId, ref: 'Pool' },
     tripId: { type: Schema.Types.ObjectId, ref: 'Trip' },
+    marketplaceOpportunityId: { type: Schema.Types.ObjectId, ref: 'MarketplaceOpportunity', index: true },
+    pickupContact: {
+      name: { type: String, trim: true, maxlength: 120 },
+      phone: { type: String, trim: true, maxlength: 20 },
+    },
+    requestedPickupWindow: {
+      startAt: { type: Date },
+      endAt: { type: Date },
+    },
+    requestedDeliveryDeadlineAt: { type: Date },
     pickupStopCode: { type: String, required: true, uppercase: true, trim: true },
     pickupStopOrder: { type: Number, required: true, min: 0 },
     deliveryStopCode: { type: String, required: true, uppercase: true, trim: true },
@@ -204,6 +236,11 @@ const shipmentSchema = new Schema<IShipment>(
       declaredContents: { type: String, required: true, trim: true, maxlength: 200 },
       handlingNotes: { type: String, trim: true, maxlength: 300 },
       irregularCargoNotes: { type: String, trim: true, maxlength: 300 },
+    },
+    serviceType: {
+      type: String,
+      enum: ['STANDARD_SCHEDULED_SHARED_POOL', 'EXPRESS_MARKETPLACE', 'NEW_ROUTE_MARKETPLACE'],
+      default: 'STANDARD_SCHEDULED_SHARED_POOL',
     },
     paymentChoice: {
       type: String,
