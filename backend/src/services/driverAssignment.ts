@@ -25,6 +25,7 @@ import { evaluateBackhaulForTrip } from './backhaulService.js';
 import { buildPoolLiveEvent } from './poolService.js';
 import { getActivePricingRules } from './pricingEngine.js';
 import { optimizeAndPlanTripRoute } from './routePlanningService.js';
+import { assertApprovedTier2Driver } from './tier2ApplicationService.js';
 
 export async function hasOverlappingDriverTrip(params: {
   driverId: Types.ObjectId | string;
@@ -74,13 +75,17 @@ async function selectEligibleDriver(params: {
     }).session(session);
 
     if (preferred) {
-      const overlaps = await hasOverlappingDriverTrip({
-        driverId: preferred.userId,
-        windowStart,
-        windowEnd,
-        session,
-      });
-      if (!overlaps) {
+      const isTier2Approved =
+        preferred.fleetTier !== 'TIER_2' || preferred.tier2ApplicationStatus === 'APPROVED';
+      const overlaps = isTier2Approved
+        ? await hasOverlappingDriverTrip({
+            driverId: preferred.userId,
+            windowStart,
+            windowEnd,
+            session,
+          })
+        : true;
+      if (isTier2Approved && !overlaps) {
         return preferred;
       }
     }
@@ -90,14 +95,18 @@ async function selectEligibleDriver(params: {
     availabilityStatus: 'AVAILABLE',
     accountStatus: { $nin: ['INACTIVE', 'SUSPENDED'] },
     userId: { $nin: Array.from(excluded) },
+    $or: [{ fleetTier: { $ne: 'TIER_2' } }, { tier2ApplicationStatus: 'APPROVED' }],
   })
     .sort({ fleetTier: 1 })
     .session(session);
 
-  // Prefer matching fleetTier first, then fallback to other available drivers
+  // Prefer matching fleetTier first, then fallback to other available drivers (strictly approved for Tier 2)
+  const approvedCandidates = candidates.filter(
+    (c) => c.fleetTier !== 'TIER_2' || c.tier2ApplicationStatus === 'APPROVED'
+  );
   const ordered = [
-    ...candidates.filter((c) => c.fleetTier === tier),
-    ...candidates.filter((c) => c.fleetTier !== tier),
+    ...approvedCandidates.filter((c) => c.fleetTier === tier),
+    ...approvedCandidates.filter((c) => c.fleetTier !== tier),
   ];
 
   for (const candidate of ordered) {
@@ -487,6 +496,10 @@ export async function respondToTripAssignment(params: {
     }
 
     if (decision === 'ACCEPT') {
+      if (trip.allocationEconomics?.allocatedTier === 'TIER_2') {
+        await assertApprovedTier2Driver(driverUserId, session);
+      }
+
       if (trip.status === 'DRIVER_ACCEPTED') {
         return { trip, reassigned: false, message: 'Trip already accepted.' };
       }

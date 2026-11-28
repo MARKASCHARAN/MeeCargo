@@ -183,7 +183,15 @@ export async function allocateVehicleForPool(params: {
     .select('vehicleId driverId')
     .session(session);
 
-  const tier1Profiles = await DriverProfile.find({ fleetTier: 'TIER_1' }).session(session);
+  const relevantProfiles = await DriverProfile.find({
+    fleetTier: { $in: ['TIER_1', 'TIER_2'] },
+  }).session(session);
+  const tier1Profiles = relevantProfiles.filter((p) => p.fleetTier === 'TIER_1');
+  const tier2ProfilesByDriverId = new Map(
+    relevantProfiles
+      .filter((p) => p.fleetTier === 'TIER_2')
+      .map((p) => [String(p.userId), p])
+  );
   const activeContracts = await DriverContract.find({ status: 'ACTIVE' }).session(session);
   // MC-051: Allocation consumes ONLY valid LOCKED slot commitments for this exact corridor/slot/date.
   const slotCommitments = await DriverSlotCommitment.find({
@@ -284,7 +292,16 @@ export async function allocateVehicleForPool(params: {
   feasibleTier1.sort((a, b) => a.maxWeightKg - b.maxWeightKg);
 
   const feasibleTier2 = candidateVehicles
-    .filter((v) => v.tier === 'TIER_2')
+    .filter((v) => {
+      if (v.tier !== 'TIER_2') return false;
+      if (v.driverId) {
+        const dp = tier2ProfilesByDriverId.get(String(v.driverId));
+        if (dp && (dp.accountStatus !== 'ACTIVE' || dp.tier2ApplicationStatus !== 'APPROVED')) {
+          return false;
+        }
+      }
+      return true;
+    })
     .sort((a, b) => a.maxWeightKg - b.maxWeightKg);
 
   // Policy: Tier 1 driver-owned contracted capacity with valid slot commitment is evaluated first

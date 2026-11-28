@@ -308,7 +308,13 @@ describe('Stage 5 Fleet Tiers, Automated Allocation & Driver Assignment (MC-018 
     vi.spyOn(DriverProfile, 'find').mockImplementation((() => ({
       sort: vi.fn().mockReturnValue({
         session: vi.fn().mockResolvedValue([
-          { userId: driver2Id, fleetTier: 'TIER_2', availabilityStatus: 'AVAILABLE' },
+          {
+            userId: driver2Id,
+            fleetTier: 'TIER_2',
+            tier2ApplicationStatus: 'APPROVED',
+            accountStatus: 'ACTIVE',
+            availabilityStatus: 'AVAILABLE',
+          },
         ]),
       }),
     })) as never);

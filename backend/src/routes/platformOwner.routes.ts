@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { Corridor } from '../models/Corridor.js';
+import { readDriverDocumentLocal } from '../services/driverDocumentStorage.js';
 import {
   createCorridorForOwner,
   createOrUpdateDriverContract,
@@ -16,6 +17,12 @@ import {
   updateTier1DriverStatus,
   upsertDriverOwnedVehicle,
 } from '../services/platformOwnerService.js';
+import {
+  approveTier2Application,
+  getTier2ApplicationDetailForOwner,
+  listTier2ApplicationsForOwner,
+  rejectTier2Application,
+} from '../services/tier2ApplicationService.js';
 import { HttpError } from '../utils/errors.js';
 
 const router = Router();
@@ -531,6 +538,122 @@ router.put('/drivers/:driverProfileId/contracts/:contractId', async (req, res) =
     eligibleCorridorIds: d.eligibleCorridorIds,
     status: d.status,
     changeNote: d.changeNote,
+  });
+
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 2 Marketplace Driver Application Review & Approval (MC-063)
+// ---------------------------------------------------------------------------
+
+router.get('/tier2-applications', async (req, res) => {
+  const statusRaw = typeof req.query.status === 'string' ? req.query.status.toUpperCase() : undefined;
+  const status =
+    statusRaw === 'PENDING' ||
+    statusRaw === 'APPROVED' ||
+    statusRaw === 'REJECTED' ||
+    statusRaw === 'ALL'
+      ? statusRaw
+      : undefined;
+  const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+
+  const result = await listTier2ApplicationsForOwner({ status, search });
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.get('/tier2-applications/:applicationId', async (req, res) => {
+  const applicationId = Array.isArray(req.params.applicationId)
+    ? req.params.applicationId[0]
+    : req.params.applicationId;
+  const application = await getTier2ApplicationDetailForOwner(applicationId);
+  res.json({
+    success: true,
+    application,
+  });
+});
+
+router.get('/tier2-applications/:applicationId/documents/:storageKey', async (req, res) => {
+  const applicationId = Array.isArray(req.params.applicationId)
+    ? req.params.applicationId[0]
+    : req.params.applicationId;
+  const storageKey = Array.isArray(req.params.storageKey)
+    ? req.params.storageKey[0]
+    : req.params.storageKey;
+
+  const application = await getTier2ApplicationDetailForOwner(applicationId);
+  const docRecord = application.uploadedDocuments?.find((d) => d.storageKey === storageKey);
+  if (!docRecord) {
+    throw new HttpError(404, 'Uploaded document not found on this application', 'NOT_FOUND');
+  }
+
+  const buffer = await readDriverDocumentLocal(docRecord.storageKey).catch(() => {
+    throw new HttpError(404, 'Document file unavailable in storage', 'NOT_FOUND');
+  });
+
+  res.setHeader('Content-Type', docRecord.mimeType);
+  res.setHeader(
+    'Content-Disposition',
+    `inline; filename="${docRecord.originalName.replace(/"/g, '')}"`
+  );
+  res.send(buffer);
+});
+
+router.post('/tier2-applications/:applicationId/approve', async (req, res) => {
+  const applicationId = Array.isArray(req.params.applicationId)
+    ? req.params.applicationId[0]
+    : req.params.applicationId;
+  const parsed = z
+    .object({
+      reviewNote: z.string().trim().max(400).optional(),
+    })
+    .safeParse(req.body ?? {});
+
+  if (!parsed.success) {
+    throw new HttpError(400, 'Invalid approval payload', 'VALIDATION_ERROR');
+  }
+
+  const result = await approveTier2Application({
+    platformOwnerId: req.auth!.userId,
+    applicationId,
+    reviewNote: parsed.data.reviewNote,
+  });
+
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.post('/tier2-applications/:applicationId/reject', async (req, res) => {
+  const applicationId = Array.isArray(req.params.applicationId)
+    ? req.params.applicationId[0]
+    : req.params.applicationId;
+  const parsed = z
+    .object({
+      reason: z.string().trim().min(5, 'Rejection reason must be at least 5 characters').max(400),
+    })
+    .safeParse(req.body ?? {});
+
+  if (!parsed.success) {
+    throw new HttpError(
+      400,
+      'Rejection reason is required (minimum 5 characters).',
+      'VALIDATION_ERROR',
+      parsed.error.flatten()
+    );
+  }
+
+  const result = await rejectTier2Application({
+    platformOwnerId: req.auth!.userId,
+    applicationId,
+    reason: parsed.data.reason,
   });
 
   res.json({

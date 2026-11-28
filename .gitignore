@@ -163,3 +163,7 @@ __pycache__/
 **/__pycache__/
 .pytest_cache/
 **/.pytest_cache/
+
+# Uploaded runtime verification & POD files
+uploads/
+**/uploads/

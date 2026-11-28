@@ -14,6 +14,7 @@ import { Trip } from '../models/Trip.js';
 import { TripEvent } from '../models/TripEvent.js';
 import { Vehicle } from '../models/Vehicle.js';
 import { evaluateBackhaulForTrip } from '../services/backhaulService.js';
+import { readDriverDocumentLocal } from '../services/driverDocumentStorage.js';
 import { respondToTripAssignment } from '../services/driverAssignment.js';
 import {
   listOpenPoolingSlotsForDriver,
@@ -33,6 +34,14 @@ import {
   updateTripShipmentLifecycle,
   verifyDeliveryAndComplete,
 } from '../services/tripExecutionService.js';
+import {
+  acceptMarketplaceOpportunity,
+  assertApprovedTier2Driver,
+  getDriverTier2ApplicationState,
+  listMarketplaceOpportunitiesForTier2,
+  submitOrResubmitTier2Application,
+  tier2ApplicationSubmissionSchema,
+} from '../services/tier2ApplicationService.js';
 import { HttpError } from '../utils/errors.js';
 
 const ALLOWED_UPLOAD_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -83,6 +92,80 @@ router.get('/profile', async (req, res) => {
   });
 });
 
+router.get('/tier2-application', async (req, res) => {
+  const state = await getDriverTier2ApplicationState(req.auth!.userId);
+  res.json({
+    success: true,
+    ...state,
+  });
+});
+
+router.get('/tier2-application/documents/:storageKey', async (req, res) => {
+  const storageKey = Array.isArray(req.params.storageKey)
+    ? req.params.storageKey[0]
+    : req.params.storageKey;
+  const state = await getDriverTier2ApplicationState(req.auth!.userId);
+  const docRecord = state.application?.uploadedDocuments?.find(
+    (d) => d.storageKey === storageKey
+  );
+  if (!docRecord) {
+    throw new HttpError(404, 'Document not found on your application', 'NOT_FOUND');
+  }
+  const buffer = await readDriverDocumentLocal(docRecord.storageKey).catch(() => {
+    throw new HttpError(404, 'Document file unavailable in storage', 'NOT_FOUND');
+  });
+  res.setHeader('Content-Type', docRecord.mimeType);
+  res.setHeader(
+    'Content-Disposition',
+    `inline; filename="${docRecord.originalName.replace(/"/g, '')}"`
+  );
+  res.send(buffer);
+});
+
+router.post('/tier2-application', async (req, res) => {
+  const parsed = tier2ApplicationSubmissionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new HttpError(
+      400,
+      'Invalid Tier 2 driver application payload',
+      'VALIDATION_ERROR',
+      parsed.error.flatten()
+    );
+  }
+
+  const result = await submitOrResubmitTier2Application({
+    driverUserId: req.auth!.userId,
+    input: parsed.data,
+  });
+
+  res.status(201).json({
+    success: true,
+    ...result,
+  });
+});
+
+router.get('/marketplace-opportunities', async (req, res) => {
+  const result = await listMarketplaceOpportunitiesForTier2(req.auth!.userId);
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
+router.post('/marketplace-opportunities/:tripId/accept', async (req, res) => {
+  const tripId = Array.isArray(req.params.tripId)
+    ? req.params.tripId[0]
+    : req.params.tripId;
+  const result = await acceptMarketplaceOpportunity({
+    driverUserId: req.auth!.userId,
+    tripId,
+  });
+  res.json({
+    success: true,
+    ...result,
+  });
+});
+
 router.put('/profile', async (req, res) => {
   const parsed = profileSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -98,6 +181,13 @@ router.put('/profile', async (req, res) => {
       'PLATFORM_OWNER_REQUIRED'
     );
   }
+  if (existingProfile && data.fleetTier !== existingProfile.fleetTier) {
+    throw new HttpError(
+      403,
+      'Drivers cannot change their fleet tier directly.',
+      'TIER_CHANGE_FORBIDDEN'
+    );
+  }
   if (data.vehicleId) {
     if (!isValidObjectId(data.vehicleId)) {
       throw new HttpError(400, 'Invalid vehicleId', 'VALIDATION_ERROR');
@@ -108,6 +198,7 @@ router.put('/profile', async (req, res) => {
     }
   }
 
+  const effectiveTier = existingProfile?.fleetTier ?? 'TIER_2';
   const profile = await DriverProfile.findOneAndUpdate(
     { userId: req.auth!.userId },
     {
@@ -115,8 +206,14 @@ router.put('/profile', async (req, res) => {
         userId: req.auth!.userId,
         name: data.name,
         phone: data.phone,
-        availabilityStatus: data.availabilityStatus,
-        fleetTier: data.fleetTier,
+        availabilityStatus:
+          effectiveTier === 'TIER_2' && existingProfile?.tier2ApplicationStatus !== 'APPROVED'
+            ? 'OFFLINE'
+            : data.availabilityStatus,
+        fleetTier: effectiveTier,
+        ...(effectiveTier === 'TIER_2' && !existingProfile
+          ? { tier2ApplicationStatus: 'PENDING' }
+          : {}),
         ...(data.licenseNumber !== undefined ? { licenseNumber: data.licenseNumber } : {}),
         ...(data.homeBase !== undefined ? { homeBase: data.homeBase } : {}),
         ...(data.vehicleId !== undefined ? { vehicleId: data.vehicleId } : {}),
@@ -136,6 +233,8 @@ router.patch('/availability', async (req, res) => {
   if (!parsed.success) {
     throw new HttpError(400, 'Invalid availability status', 'VALIDATION_ERROR');
   }
+
+  await assertApprovedTier2Driver(req.auth!.userId);
 
   const profile = await DriverProfile.findOneAndUpdate(
     { userId: req.auth!.userId },

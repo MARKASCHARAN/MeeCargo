@@ -1,4 +1,5 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
+import type { Tier2ApplicationStatus } from './Tier2Application.js';
 import type { FleetTier } from './Vehicle.js';
 
 export type DriverAvailability = 'AVAILABLE' | 'ON_TRIP' | 'OFFLINE';
@@ -12,6 +13,8 @@ export interface IDriverProfile extends Document {
   availabilityStatus: DriverAvailability;
   accountStatus: DriverAccountStatus;
   fleetTier: FleetTier;
+  tier2ApplicationStatus?: Tier2ApplicationStatus;
+  tier2ApplicationId?: Types.ObjectId;
   platformOwnerId?: Types.ObjectId;
   vehicleId?: Types.ObjectId;
   licenseNumber?: string;
@@ -42,6 +45,15 @@ const driverProfileSchema = new Schema<IDriverProfile>(
       default: 'TIER_2',
       required: true,
     },
+    tier2ApplicationStatus: {
+      type: String,
+      enum: ['PENDING', 'APPROVED', 'REJECTED'],
+      default: undefined,
+    },
+    tier2ApplicationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Tier2Application',
+    },
     platformOwnerId: {
       type: Schema.Types.ObjectId,
       ref: 'User',
@@ -60,6 +72,13 @@ driverProfileSchema.pre('validate', function () {
       'platformOwnerId',
       'Tier 1 contract drivers must have a valid platformOwnerId.'
     );
+  }
+  if (this.fleetTier === 'TIER_2') {
+    // Tier 2 marketplace drivers remain independent; never assign Platform Owner ownership
+    this.platformOwnerId = undefined;
+    if (!this.tier2ApplicationStatus) {
+      this.tier2ApplicationStatus = 'PENDING';
+    }
   }
 });
 
