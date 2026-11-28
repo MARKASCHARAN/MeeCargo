@@ -16,16 +16,15 @@ import {
   commitDriverPoolingSlot,
   fetchDriverPoolingSlots,
   withdrawDriverPoolingSlot,
-} from '../../api/client';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
-import { Card, CardContent, CardHeader } from '../../components/ui/Card';
-import { EmptyState, ErrorState, LoadingState } from '../../components/ui/StateViews';
+} from '@/api/client';
+import { Badge } from '@/components/ui/Badge';
+import { EmptyState, ErrorState, LoadingState } from '@/components/ui/StateViews';
+import { cn } from '@/lib/cn';
 import type {
   DriverPoolingSlotItem,
   DriverSlotCommitmentStatus,
   DriverWindowConflictDetail,
-} from '../../types/api';
+} from '@/types/api';
 
 function formatTime12h(hhmm?: string): string {
   if (!hhmm) return '—';
@@ -111,7 +110,10 @@ interface CorridorPoolingGroup {
   dates: CorridorDateGroup[];
 }
 
-function buildFriendlyConflictCopy(detail?: DriverWindowConflictDetail | null, fallback?: string | null) {
+function buildFriendlyConflictCopy(
+  detail?: DriverWindowConflictDetail | null,
+  fallback?: string | null
+) {
   if (!detail) {
     return {
       reason: fallback ?? 'This trip overlaps with another active commitment.',
@@ -138,9 +140,7 @@ function buildFriendlyConflictCopy(detail?: DriverWindowConflictDetail | null, f
         : 'Complete or reassign your active trip to open this window.',
     manageSlotId: detail.sourceType === 'COMMITMENT' ? detail.slotId : undefined,
     actionLabel:
-      detail.sourceType === 'COMMITMENT'
-        ? `Manage ${period} trip`
-        : 'View active trip',
+      detail.sourceType === 'COMMITMENT' ? `Manage ${period} trip` : 'View active trip',
   };
 }
 
@@ -219,9 +219,7 @@ export function DriverPoolingSlotsPage() {
         corridorId,
         code: entry.corridor.code,
         name: entry.corridor.name,
-        stops: entry.corridor.stops
-          .slice()
-          .sort((a, b) => a.sequenceOrder - b.sequenceOrder),
+        stops: entry.corridor.stops.slice().sort((a, b) => a.sequenceOrder - b.sequenceOrder),
         dates: Array.from(entry.byDate.entries())
           .sort(([da], [db]) => da.localeCompare(db))
           .map(([dateKey, slots]) => ({
@@ -276,90 +274,96 @@ export function DriverPoolingSlotsPage() {
   const data = poolingQuery.data;
 
   return (
-    <div className="space-y-5">
-      {/* A. Page Header */}
-      <div>
-        <h1 className="text-xl font-bold text-slate-900">Choose Your Trips</h1>
-        <p className="mt-0.5 text-xs text-slate-600">
-          Select the trips you&apos;re available to drive. Confirm before the cutoff time.
+    <div className="space-y-6">
+      {/* Orbit Editorial Header */}
+      <section className="orbit-reveal-1 rounded-[28px] border border-[#dce5fa] bg-white/95 p-5 shadow-[0_18px_55px_-28px_rgba(24,60,115,0.22)] sm:p-7">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.26em] text-[#7a94df]">
+          Scheduled Corridor Availability
         </p>
-      </div>
+        <h1 className="mt-1.5 text-[28px] font-[550] leading-tight tracking-[-0.04em] text-[#080e2b] sm:text-[36px]">
+          Choose your{' '}
+          <em
+            className="font-orbit-serif text-[1.12em] font-normal text-[#4a72e7]"
+            style={{ fontStyle: 'italic' }}
+          >
+            trips.
+          </em>
+        </h1>
+        <p className="mt-1.5 text-xs text-[#5c6b94] sm:text-sm">
+          Select the departure windows you&apos;re available to drive. Confirm return preference
+          before the pool cutoff time.
+        </p>
+      </section>
 
       {banner && (
-        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800">
+        <div className="orbit-reveal-1 flex items-center gap-2.5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-800">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>{banner}</span>
         </div>
       )}
       {errorBanner && (
-        <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-medium text-rose-800">
+        <div className="orbit-reveal-1 flex items-center gap-2.5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-800">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{errorBanner}</span>
         </div>
       )}
 
       {!data.eligible ? (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <AlertTriangle className="mx-auto mb-2 h-7 w-7 text-amber-500" />
-            <p className="text-sm font-semibold text-slate-900">Not Eligible for Trips</p>
-            <p className="mt-1 text-xs text-slate-600">{data.ineligibleReason}</p>
-          </CardContent>
-        </Card>
+        <div className="rounded-[28px] border border-[#dce5fa] bg-white/95 p-10 text-center shadow-xs">
+          <AlertTriangle className="mx-auto mb-3 h-8 w-8 text-amber-500" />
+          <p className="text-base font-semibold text-[#080e2b]">Not Eligible for Trips</p>
+          <p className="mt-1 text-xs text-[#5c6b94]">{data.ineligibleReason}</p>
+        </div>
       ) : groupedCorridors.length === 0 ? (
         <EmptyState
           title="No upcoming trips open right now"
           description="Check back when new trip dates open before cutoff."
         />
       ) : (
-        <div className="space-y-5">
-          {/* C. Corridor Grouping (Displayed once per corridor) */}
+        <div className="orbit-reveal-2 space-y-6">
           {groupedCorridors.map((corridorGroup) => (
-            <Card key={corridorGroup.corridorId} className="border-slate-200">
-              <CardHeader className="border-b border-slate-100 pb-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-emerald-700">
-                        {corridorGroup.code}
-                      </span>
-                      <span
-                        title="Contracts let you choose trips dynamically before cutoff."
-                        className="inline-flex cursor-help items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600"
-                      >
-                        <Info className="h-3 w-3" />
-                        Trip selection open
-                      </span>
-                    </div>
-                    <h2 className="mt-1 text-base font-bold text-slate-900">
-                      {corridorGroup.name}
-                    </h2>
-                  </div>
+            <section
+              key={corridorGroup.corridorId}
+              className="overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 shadow-[0_20px_60px_-28px_rgba(24,60,115,0.22)]"
+            >
+              <div className="border-b border-[#eaf0fd] bg-[#f8faff] px-5 py-4 sm:px-7">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-lg border border-[#cddbfa] bg-white px-2.5 py-0.5 font-mono text-xs font-bold text-[#3563e4]">
+                    {corridorGroup.code}
+                  </span>
+                  <span
+                    title="Contracts let you choose trips dynamically before cutoff."
+                    className="inline-flex cursor-help items-center gap-1 rounded-full border border-[#dce5fa] bg-white px-3 py-0.5 text-[11px] font-medium text-[#5c6b94]"
+                  >
+                    <Info className="h-3 w-3 text-[#4673eb]" />
+                    Trip selection open
+                  </span>
                 </div>
-
-                {/* Ordered stops shown once */}
-                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-                  <RouteIcon className="h-3.5 w-3.5 shrink-0 text-emerald-700" />
+                <h2 className="mt-2 text-lg font-semibold text-[#080e2b] sm:text-xl">
+                  {corridorGroup.name}
+                </h2>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-[#5c6b94]">
+                  <RouteIcon className="h-3.5 w-3.5 shrink-0 text-[#4673eb]" />
                   {corridorGroup.stops.map((stop, idx, arr) => (
-                    <span key={stop.stopCode} className="font-medium">
+                    <span key={stop.stopCode} className="font-medium text-[#4d5a83]">
                       {stop.name}
                       {idx < arr.length - 1 ? ' → ' : ''}
                     </span>
                   ))}
                 </div>
-              </CardHeader>
+              </div>
 
-              <CardContent className="space-y-5 pt-4">
+              <div className="space-y-6 p-5 sm:p-7">
                 {corridorGroup.dates.map((dateGroup) => {
                   const openPickupCount = dateGroup.slots.filter(
                     (s) => s.availabilityState !== 'UNAVAILABLE_SCHEDULE_CONFLICT'
                   ).length;
 
                   return (
-                    <div key={dateGroup.dateKey} className="space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-100/80 px-3 py-2 text-xs">
-                        <div className="flex items-center gap-2 font-semibold text-slate-800">
-                          <Calendar className="h-4 w-4 text-emerald-700" />
+                    <div key={dateGroup.dateKey} className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#e3ebfc] bg-[#f8faff] px-4 py-2.5 text-xs">
+                        <div className="flex items-center gap-2 font-semibold text-[#080e2b]">
+                          <Calendar className="h-4 w-4 text-[#4673eb]" />
                           <span>
                             {new Date(dateGroup.departureDate).toLocaleDateString('en-IN', {
                               weekday: 'short',
@@ -369,13 +373,12 @@ export function DriverPoolingSlotsPage() {
                             })}
                           </span>
                         </div>
-                        <span className="text-[11px] font-medium text-slate-600">
+                        <span className="text-[11px] font-medium text-[#5c6b94]">
                           {openPickupCount} of {dateGroup.slots.length} pickup options available
                         </span>
                       </div>
 
-                      {/* D. Separate Slot 1 & Slot 2 Cards */}
-                      <div className="grid gap-4 lg:grid-cols-2">
+                      <div className="grid gap-5 lg:grid-cols-2">
                         {dateGroup.slots.map((slot) => {
                           const commitmentStatus = slot.commitment?.status;
                           const committed =
@@ -388,8 +391,8 @@ export function DriverPoolingSlotsPage() {
                           const selectedReturn = slot.template.returnTimeLocked
                             ? slot.template.lockedReturnTime ?? ''
                             : returnDrafts[slot.slotId] ??
-                            slot.commitment?.selectedReturnTime ??
-                            '';
+                              slot.commitment?.selectedReturnTime ??
+                              '';
 
                           const selectedOptionConflict = selectedReturn
                             ? optionConflicts[selectedReturn] ?? null
@@ -427,46 +430,44 @@ export function DriverPoolingSlotsPage() {
                             <div
                               id={`driver-slot-${slot.slotId}`}
                               key={slot.slotId}
-                              className={`flex flex-col justify-between space-y-3 rounded-xl border p-4 transition-all ${isHighlighted
-                                  ? 'border-indigo-500 bg-indigo-50/40 ring-2 ring-indigo-300'
+                              className={cn(
+                                'flex flex-col justify-between space-y-4 rounded-[24px] border p-5 transition-all duration-300',
+                                isHighlighted
+                                  ? 'border-[#4673eb] bg-[#eef3ff]/70 ring-2 ring-[#4673eb]/35'
                                   : committed
-                                    ? 'border-emerald-300 bg-emerald-50/20 ring-1 ring-emerald-200'
+                                    ? 'border-[#9db9f8] bg-[#f6f9ff] shadow-[0_14px_38px_-22px_rgba(70,115,235,0.35)]'
                                     : isConflictBlocked
-                                      ? 'border-rose-200 bg-slate-50/80'
-                                      : 'border-slate-200 bg-white'
-                                }`}
+                                      ? 'border-rose-200 bg-rose-50/25'
+                                      : 'border-[#dce5fa] bg-white hover:border-[#b7caf7]'
+                              )}
                             >
-                              <div className="space-y-3">
-                                {/* Card Header: Driver Availability Status & Cutoff Countdown */}
+                              <div className="space-y-3.5">
                                 <div className="flex flex-wrap items-start justify-between gap-2">
-                                  <div>
-                                    <div className="flex flex-wrap items-center gap-1.5">
-                                      <Badge variant="neutral">Slot {slot.slotNumber}</Badge>
-                                      {committed ? (
-                                        <Badge variant="success">
-                                          {commitmentStatus === 'LOCKED' ? 'Locked' : 'Committed'} •{' '}
-                                          {formatTime12h(slot.commitment?.selectedReturnTime)} Return
-                                        </Badge>
-                                      ) : isConflictBlocked ? (
-                                        <Badge variant="danger">Your schedule conflicts</Badge>
-                                      ) : (
-                                        <Badge variant="warning">Available</Badge>
-                                      )}
-                                    </div>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <Badge variant="neutral">Slot {slot.slotNumber}</Badge>
+                                    {committed ? (
+                                      <Badge variant="success">
+                                        {commitmentStatus === 'LOCKED' ? 'Locked' : 'Committed'} •{' '}
+                                        {formatTime12h(slot.commitment?.selectedReturnTime)} Return
+                                      </Badge>
+                                    ) : isConflictBlocked ? (
+                                      <Badge variant="danger">Your schedule conflicts</Badge>
+                                    ) : (
+                                      <Badge variant="warning">Available</Badge>
+                                    )}
                                   </div>
 
                                   <span
                                     title={`Cutoff: ${new Date(slot.cutoffAt).toLocaleString('en-IN')}`}
-                                    className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800"
+                                    className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800"
                                   >
                                     <Clock className="h-3 w-3" />
                                     Cutoff: {formatDeadlineCountdown(slot.cutoffAt)}
                                   </span>
                                 </div>
 
-                                {/* E. Conflict Explanation & Direct Link */}
                                 {isConflictBlocked && conflictCopy ? (
-                                  <div className="space-y-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-950">
+                                  <div className="space-y-1.5 rounded-2xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-xs text-rose-950">
                                     <p className="font-semibold text-rose-900">
                                       {conflictCopy.reason}
                                     </p>
@@ -482,7 +483,7 @@ export function DriverPoolingSlotsPage() {
                                         onClick={() =>
                                           scrollToConflictingSlot(conflictCopy.manageSlotId!)
                                         }
-                                        className="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-rose-900 underline hover:text-rose-700"
+                                        className="mt-1 inline-flex cursor-pointer items-center gap-1 text-[11px] font-bold text-rose-900 underline hover:text-rose-700"
                                       >
                                         <ArrowDownRight className="h-3.5 w-3.5" />
                                         {conflictCopy.actionLabel}
@@ -491,23 +492,18 @@ export function DriverPoolingSlotsPage() {
                                   </div>
                                 ) : null}
 
-                                {/* F. Pickup & Return Timing Controls */}
-                                <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-2">
+                                <div className="grid gap-3 rounded-2xl border border-[#e3ebfc] bg-[#f8faff] p-3.5 sm:grid-cols-2">
                                   <div>
-                                    <p className="text-[11px] font-medium text-slate-500">
-                                      Pickup
-                                    </p>
-                                    <p className="mt-0.5 text-base font-bold text-slate-900">
+                                    <p className="text-[11px] font-medium text-[#7a87aa]">Pickup</p>
+                                    <p className="mt-0.5 text-base font-bold text-[#080e2b]">
                                       {formatTime12h(slot.template.outboundPickupTime)}
                                     </p>
                                   </div>
 
                                   <div>
-                                    <p className="text-[11px] font-medium text-slate-500">
-                                      Return
-                                    </p>
+                                    <p className="text-[11px] font-medium text-[#7a87aa]">Return</p>
                                     {slot.template.returnTimeLocked ? (
-                                      <div className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900">
+                                      <div className="mt-1 inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900">
                                         <Lock className="h-3.5 w-3.5 shrink-0" />
                                         <span>
                                           {formatTime12h(slot.template.lockedReturnTime)} — Fixed
@@ -543,12 +539,14 @@ export function DriverPoolingSlotsPage() {
                                                     [slot.slotId]: opt,
                                                   }))
                                                 }
-                                                className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${isDisabled
-                                                    ? 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 line-through'
+                                                className={cn(
+                                                  'rounded-xl border px-3 py-1.5 text-xs font-semibold transition',
+                                                  isDisabled
+                                                    ? 'cursor-not-allowed border-[#e3ebfc] bg-[#f4f7ff] text-[#a6b2d0] line-through'
                                                     : active
-                                                      ? 'border-emerald-600 bg-emerald-600 text-white'
-                                                      : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
-                                                  }`}
+                                                      ? 'cursor-pointer border-[#4673eb] bg-[#4673eb] text-white shadow-xs'
+                                                      : 'cursor-pointer border-[#d6e0f8] bg-white text-[#080e2b] hover:border-[#4673eb]'
+                                                )}
                                               >
                                                 {formatTime12h(opt)}
                                               </button>
@@ -570,14 +568,13 @@ export function DriverPoolingSlotsPage() {
                                   </div>
                                 </div>
 
-                                {/* G. Independent Pool Status & Capacity Bars */}
-                                <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 text-xs">
+                                <div className="space-y-2.5 rounded-2xl border border-[#e3ebfc] bg-white p-3.5 text-xs">
                                   <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <span className="font-semibold text-slate-700">
+                                    <span className="font-semibold text-[#5c6b94]">
                                       Pool Status:{' '}
-                                      <strong className="text-slate-900">{poolStatusText}</strong>
+                                      <strong className="text-[#080e2b]">{poolStatusText}</strong>
                                     </span>
-                                    <span className="text-[11px] text-slate-600">
+                                    <span className="text-[11px] text-[#7a87aa]">
                                       {slot.poolSummary?.shipmentCount ?? 0} shipment(s)
                                     </span>
                                   </div>
@@ -585,35 +582,35 @@ export function DriverPoolingSlotsPage() {
                                   {(capWeight > 0 || capVol > 0) && (
                                     <div className="space-y-2 pt-0.5 text-[11px]">
                                       <div>
-                                        <div className="flex justify-between text-slate-700">
+                                        <div className="flex justify-between text-[#4d5a83]">
                                           <span>
                                             Weight: {resWeight.toLocaleString('en-IN')} /{' '}
                                             {capWeight.toLocaleString('en-IN')} kg ({weightPct}%)
                                           </span>
-                                          <span className="text-slate-500">
+                                          <span className="text-[#7a87aa]">
                                             {remainingWeight.toLocaleString('en-IN')} kg left
                                           </span>
                                         </div>
-                                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-[#eef3ff]">
                                           <div
-                                            className="h-full bg-emerald-600"
+                                            className="h-full rounded-full bg-[#4673eb] transition-all duration-500"
                                             style={{ width: `${weightPct}%` }}
                                           />
                                         </div>
                                       </div>
 
                                       <div>
-                                        <div className="flex justify-between text-slate-700">
+                                        <div className="flex justify-between text-[#4d5a83]">
                                           <span>
                                             Volume: {resVol} / {capVol} m³ ({volPct}%)
                                           </span>
-                                          <span className="text-slate-500">
+                                          <span className="text-[#7a87aa]">
                                             {remainingVol} m³ left
                                           </span>
                                         </div>
-                                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-[#eef3ff]">
                                           <div
-                                            className="h-full bg-sky-600"
+                                            className="h-full rounded-full bg-[#6389f0] transition-all duration-500"
                                             style={{ width: `${volPct}%` }}
                                           />
                                         </div>
@@ -623,33 +620,36 @@ export function DriverPoolingSlotsPage() {
                                 </div>
                               </div>
 
-                              {/* Cutoff & Actions */}
-                              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
-                                <span className="text-[11px] text-slate-500">
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#eaf0fd] pt-3">
+                                <span className="text-[11px] text-[#7a87aa]">
                                   Cutoff: {new Date(slot.cutoffAt).toLocaleString('en-IN')}
                                 </span>
 
                                 <div className="flex flex-wrap gap-2">
                                   {commitmentStatus === 'COMMITTED' && (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
+                                    <button
+                                      type="button"
                                       disabled={withdrawMutation.isPending}
                                       onClick={() => withdrawMutation.mutate(slot.slotId)}
+                                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#d6e0f8] bg-white px-3.5 py-2 text-xs font-medium text-[#080e2b] transition hover:border-rose-300 hover:text-rose-700 disabled:opacity-50"
                                     >
-                                      <XCircle className="mr-1.5 h-3.5 w-3.5" />
+                                      <XCircle className="h-3.5 w-3.5" />
                                       Withdraw
-                                    </Button>
+                                    </button>
                                   )}
 
                                   {isLockedWindow ? (
-                                    <Button size="sm" variant="outline" disabled>
-                                      <Lock className="mr-1.5 h-3.5 w-3.5" />
+                                    <button
+                                      type="button"
+                                      disabled
+                                      className="inline-flex items-center gap-1.5 rounded-xl border border-[#e3ebfc] bg-[#f8faff] px-3.5 py-2 text-xs font-medium text-[#7a87aa]"
+                                    >
+                                      <Lock className="h-3.5 w-3.5" />
                                       Locked at Cutoff
-                                    </Button>
+                                    </button>
                                   ) : !committed || !slot.template.returnTimeLocked ? (
-                                    <Button
-                                      size="sm"
+                                    <button
+                                      type="button"
                                       disabled={
                                         commitMutation.isPending ||
                                         isConflictBlocked ||
@@ -664,10 +664,11 @@ export function DriverPoolingSlotsPage() {
                                             : selectedReturn,
                                         })
                                       }
+                                      className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#4673eb] px-4 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#345fda] disabled:pointer-events-none disabled:opacity-45"
                                     >
-                                      <CalendarClock className="mr-1.5 h-3.5 w-3.5" />
+                                      <CalendarClock className="h-3.5 w-3.5" />
                                       {committed ? 'Update Return' : 'Commit Availability'}
-                                    </Button>
+                                    </button>
                                   ) : null}
                                 </div>
                               </div>
@@ -678,31 +679,28 @@ export function DriverPoolingSlotsPage() {
                     </div>
                   );
                 })}
-              </CardContent>
-            </Card>
+              </div>
+            </section>
           ))}
         </div>
       )}
 
-      {/* H. Recent Activity */}
       {historicalCommitments.length > 0 && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-sm font-semibold text-slate-900">Recent Activity</h2>
-          </CardHeader>
-          <CardContent className="space-y-2">
+        <section className="orbit-reveal-3 overflow-hidden rounded-[28px] border border-[#dce5fa] bg-white/95 p-5 shadow-xs sm:p-6">
+          <h2 className="text-sm font-semibold text-[#080e2b]">Recent Activity</h2>
+          <div className="mt-3 grid gap-2.5 md:grid-cols-2">
             {historicalCommitments.map((c) => {
               const corridorObj = typeof c.corridorId === 'string' ? null : c.corridorId;
               return (
                 <div
                   key={c._id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#e3ebfc] bg-[#f8faff] px-4 py-3 text-xs"
                 >
                   <div>
-                    <p className="font-semibold text-slate-900">
+                    <p className="font-semibold text-[#080e2b]">
                       {corridorObj?.name ?? corridorObj?.code ?? 'Corridor'} • Slot {c.slotNumber}
                     </p>
-                    <p className="text-slate-600">
+                    <p className="text-[#5c6b94]">
                       {new Date(c.departureDate).toLocaleDateString('en-IN', {
                         weekday: 'short',
                         day: '2-digit',
@@ -719,8 +717,8 @@ export function DriverPoolingSlotsPage() {
                 </div>
               );
             })}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       )}
     </div>
   );
