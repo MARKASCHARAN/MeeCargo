@@ -157,6 +157,12 @@ router.post('/quote-preview', requireAuth, async (req, res) => {
     allowSubsidy: true,
   });
 
+  // Preview reflects standard refundable token deduction so remaining balance is accurate
+  breakdown.remainingBalancePaise = Math.max(
+    0,
+    breakdown.computedPricePaise - breakdown.tokenAmountPaise
+  );
+
   res.json({
     success: true,
     isEstimateFinal: false,
@@ -367,6 +373,18 @@ router.get('/', requireBusinessProfile, async (req, res) => {
 });
 
 router.post('/', requireBusinessProfile, async (req, res) => {
+  if (
+    req.body &&
+    typeof req.body === 'object' &&
+    ('slotId' in req.body || 'poolId' in req.body || 'driverId' in req.body)
+  ) {
+    throw new HttpError(
+      400,
+      'Shippers cannot select driver pickup slots, pools, or drivers; choose an operating serviceDate instead.',
+      'DRIVER_SLOT_SELECTION_FORBIDDEN'
+    );
+  }
+
   const parsed = createBookingSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new HttpError(

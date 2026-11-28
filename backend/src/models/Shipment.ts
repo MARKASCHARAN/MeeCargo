@@ -19,6 +19,7 @@ export type ShipmentStatus =
   | 'CANCELLED'
   | 'ROLLED_OVER';
 
+export type ServiceScope = 'STANDARD_SCHEDULED_SHARED_POOL';
 export type PaymentChoice = 'TOKEN_PLUS_PICKUP_BALANCE' | 'FULL_PREPAID';
 export type TokenPaymentState =
   | 'UNPAID'
@@ -96,6 +97,7 @@ export interface IShipment extends Document {
   recipientName: string;
   recipientPhone: string;
   cargo: ShipmentCargo;
+  serviceType?: ServiceScope;
   paymentChoice: PaymentChoice;
   tokenStatus: TokenPaymentState;
   pricingSnapshot?: ShipmentPricingSnapshot;
@@ -204,6 +206,11 @@ const shipmentSchema = new Schema<IShipment>(
       declaredContents: { type: String, required: true, trim: true, maxlength: 200 },
       handlingNotes: { type: String, trim: true, maxlength: 300 },
       irregularCargoNotes: { type: String, trim: true, maxlength: 300 },
+    },
+    serviceType: {
+      type: String,
+      enum: ['STANDARD_SCHEDULED_SHARED_POOL'],
+      default: 'STANDARD_SCHEDULED_SHARED_POOL',
     },
     paymentChoice: {
       type: String,

@@ -314,15 +314,24 @@ describe('Stage 10 Optimizer Integration, Rounding Precision & End-to-End Flow (
         { stopCode: 'ANA', sequenceOrder: 1 },
       ],
     } as never);
-    vi.spyOn(Slot, 'findById').mockResolvedValueOnce({
-      _id: slotId,
-      corridorId,
-      status: 'OPEN',
-      cutoffAt: new Date(Date.now() + 3600_000),
-      capacityWeightKg: 2500,
-      capacityVolumeCbm: 12,
-      reservedWeightKg: 0,
-      reservedVolumeCbm: 0,
+    const serviceDateObj = new Date(Date.now() + 86_400_000);
+    const serviceDateStr = serviceDateObj.toISOString().slice(0, 10);
+
+    vi.spyOn(Slot, 'find').mockReturnValueOnce({
+      sort: vi.fn().mockResolvedValue([
+        {
+          _id: slotId,
+          corridorId,
+          departureDate: serviceDateObj,
+          plannedDepartureAt: new Date(Date.now() + 7200_000),
+          status: 'OPEN',
+          cutoffAt: new Date(Date.now() + 3600_000),
+          capacityWeightKg: 2500,
+          capacityVolumeCbm: 12,
+          reservedWeightKg: 0,
+          reservedVolumeCbm: 0,
+        },
+      ]),
     } as never);
     vi.spyOn(Shipment, 'create').mockResolvedValueOnce(shipmentState as never);
 
@@ -331,7 +340,7 @@ describe('Stage 10 Optimizer Integration, Rounding Precision & End-to-End Flow (
       .set('Authorization', `Bearer ${shipperToken}`)
       .send({
         corridorId: String(corridorId),
-        slotId: String(slotId),
+        serviceDate: serviceDateStr,
         pickupStopCode: 'VAD',
         deliveryStopCode: 'ANA',
         deliveryAddress: shipmentState.deliveryAddress,

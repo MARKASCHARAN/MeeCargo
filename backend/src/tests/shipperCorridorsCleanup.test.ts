@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app.js';
+import { BusinessProfile } from '../models/BusinessProfile.js';
 import { Corridor } from '../models/Corridor.js';
 import { DriverSlotCommitment } from '../models/DriverSlotCommitment.js';
 import { Pool } from '../models/Pool.js';
@@ -411,5 +412,160 @@ describe('MC-058: Shipper Scheduled Corridors & Live Pools Cleanup + Automated C
     expect(quoteRes.status).toBe(200);
     expect(quoteRes.body.breakdown.ceilingPricePaise).toBe(70000);
     expect(quoteRes.body.breakdown.effectiveRatePaisePerKg).toBeLessThanOrEqual(650);
+    expect(quoteRes.body.breakdown.remainingBalancePaise).toBe(
+      Math.max(
+        0,
+        quoteRes.body.breakdown.computedPricePaise - quoteRes.body.breakdown.tokenAmountPaise
+      )
+    );
+  });
+
+  it('MC-062: enforces corridor origin hub, drop-zone geo radius, token-only payment, and blocks HTTP slotId manipulation', async () => {
+    const app = createApp();
+    const shipperId = new Types.ObjectId();
+    const businessId = new Types.ObjectId();
+    const corridorId = new Types.ObjectId();
+    const slotId = new Types.ObjectId();
+    const shipperToken = signAccessToken({
+      _id: shipperId,
+      role: 'SHIPPER',
+      businessId,
+    });
+
+    vi.spyOn(User, 'findById').mockReturnValue({
+      select: vi.fn().mockResolvedValue({ _id: shipperId, role: 'SHIPPER', isActive: true }),
+    } as never);
+    vi.spyOn(BusinessProfile, 'findOne').mockResolvedValue({
+      _id: businessId,
+      isActive: true,
+      pickupAddress: {
+        addressLine: 'Plot 1',
+        villageOrTown: 'Vadodara',
+        district: 'Vadodara',
+        state: 'Gujarat',
+        pincode: '390010',
+        location: { type: 'Point', coordinates: [73.1812, 22.3072] },
+      },
+    } as never);
+
+    const validDeliveryAddress = {
+      addressLine: 'Plot 12, GIDC',
+      villageOrTown: 'Anand',
+      district: 'Anand',
+      state: 'Gujarat',
+      pincode: '388001',
+      location: { type: 'Point' as const, coordinates: [72.9289, 22.5645] as [number, number] },
+    };
+    const validCargo = {
+      category: 'STANDARD_BOX' as const,
+      quantity: 2,
+      length: 50,
+      width: 40,
+      height: 40,
+      dimensionUnit: 'CM' as const,
+      unitActualWeight: 18,
+      weightUnit: 'KG' as const,
+      stackable: true,
+      handlingRestrictions: [],
+      declaredContents: 'Cartons',
+    };
+
+    // 1. Blocks shipper-supplied slotId in HTTP POST /api/v1/shipments
+    const slotTamperRes = await request(app)
+      .post('/api/v1/shipments')
+      .set('Authorization', `Bearer ${shipperToken}`)
+      .send({
+        corridorId: String(corridorId),
+        serviceDate: '2026-12-05',
+        slotId: String(slotId),
+        pickupStopCode: 'VAD',
+        deliveryStopCode: 'ANA',
+        deliveryAddress: validDeliveryAddress,
+        recipientName: 'Anand Buyer',
+        recipientPhone: '+919825000111',
+        cargo: validCargo,
+      });
+    expect(slotTamperRes.status).toBe(400);
+    expect(slotTamperRes.body.code).toBe('DRIVER_SLOT_SELECTION_FORBIDDEN');
+
+    // 2. Rejects unsupported FULL_PREPAID payment option on HTTP booking
+    const prepaidRes = await request(app)
+      .post('/api/v1/shipments')
+      .set('Authorization', `Bearer ${shipperToken}`)
+      .send({
+        corridorId: String(corridorId),
+        serviceDate: '2026-12-05',
+        pickupStopCode: 'VAD',
+        deliveryStopCode: 'ANA',
+        deliveryAddress: validDeliveryAddress,
+        recipientName: 'Anand Buyer',
+        recipientPhone: '+919825000111',
+        cargo: validCargo,
+        paymentChoice: 'FULL_PREPAID',
+      });
+    expect(prepaidRes.status).toBe(400);
+
+    // 3. Rejects intermediate stop as origin hub (INVALID_ORIGIN_STOP)
+    vi.spyOn(Corridor, 'findOne').mockResolvedValueOnce({
+      _id: corridorId,
+      code: 'GJ-VAD-AMD-01',
+      isActive: true,
+      stops: [
+        { stopCode: 'VAD', name: 'Vadodara Hub', sequenceOrder: 0, location: { coordinates: [73.1812, 22.3072] } },
+        { stopCode: 'ANA', name: 'Anand Drop Zone', sequenceOrder: 1, location: { coordinates: [72.9289, 22.5645] } },
+        { stopCode: 'AMD', name: 'Ahmedabad Destination', sequenceOrder: 2, location: { coordinates: [72.5714, 23.0225] } },
+      ],
+    } as never);
+    await expect(
+      createShipmentBooking({
+        business: { _id: businessId, pickupAddress: { location: { coordinates: [73.1812, 22.3072] } } } as never,
+        userId: String(shipperId),
+        input: {
+          corridorId: String(corridorId),
+          serviceType: 'STANDARD_SCHEDULED_SHARED_POOL',
+          serviceDate: '2026-12-05',
+          pickupStopCode: 'ANA',
+          deliveryStopCode: 'AMD',
+          deliveryAddress: validDeliveryAddress,
+          recipientName: 'Buyer',
+          recipientPhone: '+919825000111',
+          cargo: validCargo,
+          paymentChoice: 'TOKEN_PLUS_PICKUP_BALANCE',
+        },
+      })
+    ).rejects.toMatchObject({ code: 'INVALID_ORIGIN_STOP' });
+
+    // 4. Rejects delivery pin outside destination drop zone radius (DELIVERY_OUT_OF_DROP_ZONE)
+    vi.spyOn(Corridor, 'findOne').mockResolvedValueOnce({
+      _id: corridorId,
+      code: 'GJ-VAD-AMD-01',
+      isActive: true,
+      stops: [
+        { stopCode: 'VAD', name: 'Vadodara Hub', sequenceOrder: 0, location: { coordinates: [73.1812, 22.3072] } },
+        { stopCode: 'ANA', name: 'Anand Drop Zone', sequenceOrder: 1, location: { coordinates: [72.9289, 22.5645] } },
+        { stopCode: 'AMD', name: 'Ahmedabad Destination', sequenceOrder: 2, location: { coordinates: [72.5714, 23.0225] } },
+      ],
+    } as never);
+    await expect(
+      createShipmentBooking({
+        business: { _id: businessId, pickupAddress: { location: { coordinates: [73.1812, 22.3072] } } } as never,
+        userId: String(shipperId),
+        input: {
+          corridorId: String(corridorId),
+          serviceType: 'STANDARD_SCHEDULED_SHARED_POOL',
+          serviceDate: '2026-12-05',
+          pickupStopCode: 'VAD',
+          deliveryStopCode: 'ANA',
+          deliveryAddress: {
+            ...validDeliveryAddress,
+            location: { type: 'Point', coordinates: [72.5714, 23.0225] }, // ~63 km away (Ahmedabad vs Anand)
+          },
+          recipientName: 'Buyer',
+          recipientPhone: '+919825000111',
+          cargo: validCargo,
+          paymentChoice: 'TOKEN_PLUS_PICKUP_BALANCE',
+        },
+      })
+    ).rejects.toMatchObject({ code: 'DELIVERY_OUT_OF_DROP_ZONE' });
   });
 });
