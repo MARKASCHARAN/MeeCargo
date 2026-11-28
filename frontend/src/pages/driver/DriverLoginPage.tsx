@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 
 const driverLoginSchema = z.object({
   email: z.string().trim().email('Enter a valid email address'),
-  password: z.string().min(6, 'Password is required'),
+  password: z.string().min(1, 'Password is required'),
 });
 
 type DriverLoginFormValues = z.infer<typeof driverLoginSchema>;
@@ -55,8 +55,8 @@ export function DriverLoginPage() {
   };
 
   const fillDemo = (email: string) => {
-    setValue('email', email);
-    setValue('password', 'Password123!');
+    setValue('email', email, { shouldValidate: true });
+    setValue('password', 'Demo@1234', { shouldValidate: true });
   };
 
   return (
@@ -90,6 +90,7 @@ export function DriverLoginPage() {
               </label>
               <input
                 type="email"
+                autoComplete="email"
                 {...register('email')}
                 placeholder="driver@meecargo.demo"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
@@ -105,6 +106,7 @@ export function DriverLoginPage() {
               </label>
               <input
                 type="password"
+                autoComplete="current-password"
                 {...register('password')}
                 placeholder="••••••••"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
